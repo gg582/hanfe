@@ -13,6 +13,7 @@ add_executable(hanfe
     src/layout.cpp
     src/emitter.cpp
     src/engine.cpp
+    src/device.cpp
     src/util.cpp
 )
 

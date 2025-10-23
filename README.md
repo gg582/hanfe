@@ -8,6 +8,7 @@
 - **프리에딧 시뮬레이션**: 조합 중인 글자를 가상 키보드로 입력한 뒤 백스페이스로 교체하여 IME를 인식하지 않는 프로그램에도 한글을 전달합니다.
 - **토글 키 지정**: `toggle.ini` 또는 `--toggle-config`로 한글/영문 전환 키를 설정할 수 있습니다. 기본값은 `KEY_RIGHTALT`와 `KEY_HANGUL` 조합입니다.
 - **TTY 미러 출력**: `--tty /dev/ttyX` 옵션으로 조합된 결과를 특정 TTY에도 동시에 기록할 수 있습니다.
+- **자동 키보드 감지**: `--device` 옵션을 생략하면 `/dev/input` 아래에서 키보드로 보이는 장치를 찾아 자동으로 사용합니다.
 
 ## 빌드
 
@@ -35,13 +36,15 @@ sudo cmake --install build --prefix /usr
 
 ## 실행 예시
 
+기본적으로 `hanfe`는 `/dev/input/by-id/*-kbd` 등 키보드로 보이는 장치를 자동으로 선택합니다.
+
 ```bash
-sudo ./build/hanfe --device /dev/input/event3 --layout dubeolsik
+sudo ./build/hanfe --layout dubeolsik
 ```
 
 주요 옵션:
 
-- `--device PATH` : 가로챌 키보드 evdev 장치 경로 (필수)
+- `--device PATH` : 가로챌 키보드 evdev 장치 경로 (생략하면 자동 감지, 감지 실패 시 직접 지정)
 - `--layout {dubeolsik|sebeolsik-390}` : 사용할 자판 (기본값 `dubeolsik`)
 - `--toggle-config PATH` : 토글 키 설정 파일 지정 (기본값은 현재 디렉터리의 `toggle.ini`, 없으면 내장 기본값 사용)
 - `--tty /dev/ttyX` : 결과를 지정한 TTY에도 동시에 출력

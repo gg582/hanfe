@@ -46,9 +46,9 @@ CliOptions parse_arguments(int argc, char** argv) {
 
 void print_usage() {
     std::cout << "hanfe - Hangul IME interceptor\n";
-    std::cout << "Usage: hanfe --device /dev/input/eventX [options]\n\n";
+    std::cout << "Usage: hanfe [--device /dev/input/eventX] [options]\n\n";
     std::cout << "Options:\n";
-    std::cout << "  --device PATH           Path to the evdev keyboard device (required)\n";
+    std::cout << "  --device PATH           Path to the evdev keyboard device (auto-detected if omitted)\n";
     std::cout << "  --layout NAME           Keyboard layout (default: dubeolsik)\n";
     std::cout << "  --toggle-config PATH    Path to toggle.ini (default: ./toggle.ini if present)\n";
     std::cout << "  --tty PATH              Optional TTY to mirror text output to\n";

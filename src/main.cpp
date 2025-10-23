@@ -1,14 +1,15 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <system_error>
 
 #include "hanfe/cli.hpp"
 #include "hanfe/config.hpp"
+#include "hanfe/device.hpp"
 #include "hanfe/engine.hpp"
 #include "hanfe/layout.hpp"
 
@@ -72,19 +73,33 @@ int main(int argc, char** argv) {
             return 0;
         }
 
-        if (options.device_path.empty()) {
-            std::cerr << "Error: --device is required.\n";
-            print_usage();
-            return 1;
+        std::string device_path = options.device_path;
+        if (device_path.empty()) {
+            std::string detection_error;
+            auto detected = detect_keyboard_device(&detection_error);
+            if (!detected) {
+                std::cerr << "Error: failed to auto-detect a keyboard device";
+                if (!detection_error.empty()) {
+                    std::cerr << ": " << detection_error;
+                }
+                std::cerr << "\nProvide --device /dev/input/eventX explicitly.\n";
+                return 1;
+            }
+            device_path = detected->path;
+            std::cout << "Auto-detected keyboard device: " << device_path;
+            if (!detected->name.empty()) {
+                std::cout << " [" << detected->name << "]";
+            }
+            std::cout << '\n';
         }
 
         Layout layout = load_layout(options.layout_name);
         ToggleConfig toggle = resolve_toggle_config(options);
 
-        int fd_raw = ::open(options.device_path.c_str(), O_RDONLY | O_NONBLOCK);
+        int fd_raw = ::open(device_path.c_str(), O_RDONLY | O_NONBLOCK);
         if (fd_raw < 0) {
-            throw std::runtime_error("Failed to open device '" + options.device_path + "': " +
-                                     std::string(strerror(errno)));
+            std::error_code ec(errno, std::system_category());
+            throw std::runtime_error("Failed to open device '" + device_path + "': " + ec.message());
         }
         FdHolder device_fd(fd_raw);
 
