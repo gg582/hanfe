@@ -156,3 +156,27 @@ func TestHangulComposerNoAutoIeung(t *testing.T) {
 		t.Fatalf("expected new vowel preedit to be 'ㅏ', got %q", result.Preedit)
 	}
 }
+
+func TestHangulComposerCarryTrailingToLeading(t *testing.T) {
+	composer := NewHangulComposer()
+
+	composer.Feed('ㅂ', RoleAuto)
+	composer.Feed('ㅗ', RoleAuto)
+
+	result := composer.Feed('ㅈ', RoleAuto)
+	if result.Preedit != "봊" {
+		t.Fatalf("expected trailing consonant to produce '봊', got %q", result.Preedit)
+	}
+
+	result = composer.Feed('ㅏ', RoleAuto)
+	if result.Commit != "보" {
+		t.Fatalf("expected previous syllable to commit as '보', got %q", result.Commit)
+	}
+	if result.Preedit != "자" {
+		t.Fatalf("expected new syllable to start with '자', got %q", result.Preedit)
+	}
+
+	if composer.Flush() != "자" {
+		t.Fatalf("expected flush to commit trailing syllable '자'")
+	}
+}

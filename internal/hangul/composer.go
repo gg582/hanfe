@@ -248,12 +248,6 @@ func (c *HangulComposer) handleVowel(ch rune) []rune {
 		return commit
 	}
 
-	pair := [2]rune{*c.vowel, ch}
-	if combined, ok := doubleMedial[pair]; ok {
-		c.vowel = runePtr(combined)
-		return commit
-	}
-
 	if c.trailing != nil {
 		if split, ok := finalDecompose[*c.trailing]; ok {
 			first := split[0]
@@ -265,10 +259,18 @@ func (c *HangulComposer) handleVowel(ch rune) []rune {
 			c.trailing = nil
 			return commit
 		}
+		trailing := *c.trailing
+		c.trailing = nil
 		commit = c.compose()
-		c.leading = nil
+		c.leading = runePtr(trailing)
 		c.vowel = runePtr(ch)
 		c.trailing = nil
+		return commit
+	}
+
+	pair := [2]rune{*c.vowel, ch}
+	if combined, ok := doubleMedial[pair]; ok {
+		c.vowel = runePtr(combined)
 		return commit
 	}
 

@@ -89,7 +89,7 @@ Options:
   --device PATH           Path to the evdev keyboard device (auto-detected if omitted)
   --layout NAME           Keyboard layout (default: dubeolsik)
   --toggle-config PATH    Path to toggle.ini (default: ./toggle.ini if present)
-  --tty PATH              Optional TTY to mirror text output to
+  --tty PATH              TTY to mirror text output to (defaults to controlling TTY)
   --pty PATH              Optional PTY to mirror committed text without raw hex
   --daemon                Run in the background (default)
   --no-daemon             Stay in the foreground
