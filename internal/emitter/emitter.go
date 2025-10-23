@@ -74,6 +74,15 @@ func Open(hexMap map[rune]uint16, ttyClient *ttybridge.Client, ptyPath string) (
 		emitter.ptyFD = ptyFD
 	}
 
+	if ptyPath != "" {
+		ptyFD, err := syscall.Open(ptyPath, syscall.O_WRONLY|syscall.O_CLOEXEC, 0)
+		if err != nil {
+			emitter.Close()
+			return nil, fmt.Errorf("open pty %s: %w", ptyPath, err)
+		}
+		emitter.ptyFD = ptyFD
+	}
+
 	return emitter, nil
 }
 
@@ -121,6 +130,10 @@ func (e *FallbackEmitter) Close() error {
 	if e.ttyClient != nil {
 		_ = e.ttyClient.Close()
 		e.ttyClient = nil
+	}
+	if e.ptyFD >= 0 {
+		syscall.Close(e.ptyFD)
+		e.ptyFD = -1
 	}
 	if e.ptyFD >= 0 {
 		syscall.Close(e.ptyFD)
