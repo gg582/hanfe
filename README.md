@@ -1,45 +1,44 @@
 # hanfe
 
-`hanfe`는 리눅스 evdev 키보드 이벤트를 가로채어 모든 환경(X11, Wayland, TTY)에서 사용할 수 있는 C++ 기반 한글 IME입니다. 실제 키보드 장치를 읽어 들여 두벌식 또는 세벌식(390) 자판 규칙에 맞춰 영어 입력을 한글 음절로 조합하고, 가상 uinput 키보드를 통해 다시 이벤트를 주입합니다. `Ctrl+Shift+U` 유니코드 시퀀스를 사용하므로 대부분의 애플리케이션에서 한글 입력이 동작하며, 필요하면 지정한 TTY에 직접 출력을 복제할 수도 있습니다.
+`hanfe`는 리눅스 evdev 키보드 이벤트를 가로채어 모든 환경(X11, Wayland, TTY)에서 사용할 수 있는 Go 기반 한글 IME입니다. 실제 키보드 장치에서 입력을 읽어 두벌식 또는 세벌식(390) 자판 규칙에 맞춰 영어 키 입력을 한글 음절로 조합하고, 가상 uinput 키보드를 통해 다시 이벤트를 주입합니다. `Ctrl+Shift+U` 유니코드 시퀀스를 사용하므로 대부분의 애플리케이션에서 한글 입력이 동작하며, 필요하면 지정한 TTY에 직접 출력을 복제할 수도 있습니다.
 
 ## 주요 기능
 
-- **두벌식 / 세벌식 390 자판 지원**: 두 레이아웃은 바이너리에 내장되어 있으며 실행 시 `--layout` 옵션으로 선택할 수 있습니다.
-- **프리에딧 시뮬레이션**: 조합 중인 글자를 가상 키보드로 입력한 뒤 백스페이스로 교체하여 IME를 인식하지 않는 프로그램에도 한글을 전달합니다.
-- **토글 키 지정**: `toggle.ini` 또는 `--toggle-config`로 한글/영문 전환 키를 설정할 수 있습니다. 기본값은 `KEY_RIGHTALT`와 `KEY_HANGUL` 조합입니다.
+- **두벌식 / 세벌식 390 자판 지원**: 실행 시 `--layout` 옵션으로 자판을 선택할 수 있습니다.
+- **프리에딧 시뮬레이션**: 조합 중인 글자를 가상 키보드로 입력하고 백스페이스로 교체하여 IME를 인식하지 않는 프로그램에도 한글을 전달합니다.
+- **토글 키 지정**: `toggle.ini` 또는 `--toggle-config`로 한글/영문 전환 키를 설정할 수 있습니다. 기본값은 `KEY_RIGHTALT`와 `KEY_HANGEUL` 입니다.
 - **TTY 미러 출력**: `--tty /dev/ttyX` 옵션으로 조합된 결과를 특정 TTY에도 동시에 기록할 수 있습니다.
 - **자동 키보드 감지**: `--device` 옵션을 생략하면 `/dev/input` 아래에서 키보드로 보이는 장치를 찾아 자동으로 사용합니다.
 
 ## 빌드
 
-필요 패키지: `cmake`, `g++`(C++20 지원). Ubuntu 기준 설치 예시는 다음과 같습니다.
+필요 패키지: `golang`(Go 1.22 이상 추천).
+
+Ubuntu 예시:
 
 ```bash
 sudo apt-get update
-sudo apt-get install build-essential cmake
+sudo apt-get install golang
 ```
 
 그 다음 프로젝트를 빌드합니다.
 
 ```bash
-cmake -S . -B build
-cmake --build build
+go build ./...
 ```
 
-완료 후 실행 파일은 `build/hanfe`에 생성됩니다. 시스템 전역 설치가 필요하면 관리자 권한으로 다음을 실행할 수 있습니다.
+완료 후 실행 파일은 다음 명령으로 생성할 수 있습니다.
 
 ```bash
-sudo cmake --install build --prefix /usr
+go build -o hanfe ./cmd/hanfe
 ```
-
-이는 `/usr/bin/hanfe`에 바이너리를 배치합니다.
 
 ## 실행 예시
 
 기본적으로 `hanfe`는 `/dev/input/by-id/*-kbd` 등 키보드로 보이는 장치를 자동으로 선택합니다.
 
 ```bash
-sudo ./build/hanfe --layout dubeolsik
+sudo ./hanfe --layout dubeolsik
 ```
 
 주요 옵션:
@@ -65,12 +64,6 @@ default_mode = hangul
 
 - `keys` : 쉼표로 구분된 `KEY_*` 이름 목록입니다. 첫 번째로 눌린 토글 키가 입력 모드를 전환합니다.
 - `default_mode` : 시작 모드 (`hangul` 또는 `latin`).
-
-`alt_r`, `hangul`과 같은 일부 축약 이름도 사용할 수 있지만 가능하면 `KEY_*` 표기를 권장합니다.
-
-## 레이아웃 메모
-
-두벌식과 세벌식 390 매핑은 `src/layout.cpp`에 하드코딩되어 있습니다. 필요하다면 해당 파일을 수정하여 키 매핑을 조정하거나 새로운 레이아웃을 추가한 뒤 `load_layout` 함수를 확장할 수 있습니다.
 
 ## 주의 사항
 
