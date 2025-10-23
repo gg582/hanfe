@@ -11,8 +11,13 @@ import (
 	"hanfe/internal/types"
 )
 
+type ToggleChord struct {
+	Key            uint16
+	ModifierGroups [][]uint16
+}
+
 type ToggleConfig struct {
-	ToggleKeys  []uint16
+	Chords      []ToggleChord
 	DefaultMode types.InputMode
 }
 
@@ -24,7 +29,10 @@ func (e ConfigError) Error() string { return e.msg }
 
 func DefaultToggleConfig() ToggleConfig {
 	return ToggleConfig{
-		ToggleKeys:  []uint16{uint16(linux.KeyRightAlt), uint16(linux.KeyHangeul)},
+		Chords: []ToggleChord{
+			{Key: uint16(linux.KeyRightAlt)},
+			{Key: uint16(linux.KeyHangeul)},
+		},
 		DefaultMode: types.ModeHangul,
 	}
 }
@@ -38,6 +46,7 @@ func LoadToggleConfig(path string) (ToggleConfig, error) {
 
 	scanner := bufio.NewScanner(file)
 	inToggle := false
+	var keyLine string
 	var keysLine string
 	var modeLine string
 
@@ -61,6 +70,8 @@ func LoadToggleConfig(path string) (ToggleConfig, error) {
 		key := strings.TrimSpace(parts[0])
 		value := strings.TrimSpace(parts[1])
 		switch key {
+		case "key":
+			keyLine = value
 		case "keys":
 			keysLine = value
 		case "default_mode":
@@ -72,24 +83,25 @@ func LoadToggleConfig(path string) (ToggleConfig, error) {
 		return ToggleConfig{}, ConfigError{msg: fmt.Sprintf("failed to read %s: %v", path, err)}
 	}
 
-	if strings.TrimSpace(keysLine) == "" {
-		return ToggleConfig{}, ConfigError{msg: fmt.Sprintf("no toggle keys defined in %s", path)}
+	tokens := splitComma(keysLine)
+	if trimmed := strings.TrimSpace(keyLine); trimmed != "" {
+		tokens = append(tokens, trimmed)
 	}
 
-	tokens := splitComma(keysLine)
 	if len(tokens) == 0 {
 		return ToggleConfig{}, ConfigError{msg: fmt.Sprintf("no toggle keys defined in %s", path)}
 	}
 
-	cfg := ToggleConfig{}
+	chords := make([]ToggleChord, 0, len(tokens))
 	for _, token := range tokens {
-		code, err := parseKeycode(token)
+		chord, err := parseToggleExpression(token)
 		if err != nil {
 			return ToggleConfig{}, err
 		}
-		cfg.ToggleKeys = append(cfg.ToggleKeys, code)
+		chords = append(chords, chord)
 	}
 
+	cfg := ToggleConfig{Chords: chords, DefaultMode: types.ModeHangul}
 	if modeLine != "" {
 		switch strings.ToLower(strings.TrimSpace(modeLine)) {
 		case "hangul":
@@ -99,8 +111,6 @@ func LoadToggleConfig(path string) (ToggleConfig, error) {
 		default:
 			return ToggleConfig{}, ConfigError{msg: fmt.Sprintf("invalid default_mode '%s' in %s", modeLine, path)}
 		}
-	} else {
-		cfg.DefaultMode = types.ModeHangul
 	}
 
 	return cfg, nil
@@ -118,21 +128,62 @@ func splitComma(value string) []string {
 	return out
 }
 
-func parseKeycode(name string) (uint16, error) {
+func parseToggleExpression(expr string) (ToggleChord, error) {
+	segments := strings.Split(expr, "+")
+	if len(segments) == 0 {
+		return ToggleChord{}, ConfigError{msg: fmt.Sprintf("invalid toggle expression '%s'", expr)}
+	}
+
+	chord := ToggleChord{}
+	for i, segment := range segments {
+		codes, err := parseKeyToken(segment)
+		if err != nil {
+			return ToggleChord{}, err
+		}
+		if len(codes) == 0 {
+			return ToggleChord{}, ConfigError{msg: fmt.Sprintf("invalid key token '%s'", segment)}
+		}
+		if i == len(segments)-1 {
+			if len(codes) != 1 {
+				return ToggleChord{}, ConfigError{msg: fmt.Sprintf("toggle trigger '%s' must resolve to a single key", segment)}
+			}
+			chord.Key = codes[0]
+		} else {
+			chord.ModifierGroups = append(chord.ModifierGroups, codes)
+		}
+	}
+	return chord, nil
+}
+
+func parseKeyToken(name string) ([]uint16, error) {
 	normalized := strings.ToUpper(strings.TrimSpace(name))
 	if normalized == "" {
-		return 0, ConfigError{msg: "empty key name"}
+		return nil, ConfigError{msg: "empty key name"}
+	}
+
+	if codes, ok := modifierAlias()[normalized]; ok {
+		return codes, nil
 	}
 
 	aliases := map[string]string{
-		"ALT_R":   "KEY_RIGHTALT",
-		"ALT_L":   "KEY_LEFTALT",
-		"CTRL_L":  "KEY_LEFTCTRL",
-		"CTRL_R":  "KEY_RIGHTCTRL",
-		"SHIFT_L": "KEY_LEFTSHIFT",
-		"SHIFT_R": "KEY_RIGHTSHIFT",
-		"HANGUL":  "KEY_HANGUL",
-		"HANGEUL": "KEY_HANGEUL",
+		"ALT_R":      "KEY_RIGHTALT",
+		"ALT_L":      "KEY_LEFTALT",
+		"RIGHTALT":   "KEY_RIGHTALT",
+		"LEFTALT":    "KEY_LEFTALT",
+		"CTRL_R":     "KEY_RIGHTCTRL",
+		"CTRL_L":     "KEY_LEFTCTRL",
+		"CONTROL_R":  "KEY_RIGHTCTRL",
+		"CONTROL_L":  "KEY_LEFTCTRL",
+		"RIGHTCTRL":  "KEY_RIGHTCTRL",
+		"LEFTCTRL":   "KEY_LEFTCTRL",
+		"SHIFT_R":    "KEY_RIGHTSHIFT",
+		"SHIFT_L":    "KEY_LEFTSHIFT",
+		"RIGHTSHIFT": "KEY_RIGHTSHIFT",
+		"LEFTSHIFT":  "KEY_LEFTSHIFT",
+		"META_R":     "KEY_RIGHTMETA",
+		"META_L":     "KEY_LEFTMETA",
+		"HANGUL":     "KEY_HANGUL",
+		"HANGEUL":    "KEY_HANGEUL",
 	}
 	if alias, ok := aliases[normalized]; ok {
 		normalized = alias
@@ -142,11 +193,22 @@ func parseKeycode(name string) (uint16, error) {
 		normalized = "KEY_" + normalized
 	}
 
-	code, ok := keycodeTable()[normalized]
+	table := keycodeTable()
+	code, ok := table[normalized]
 	if !ok {
-		return 0, ConfigError{msg: fmt.Sprintf("unknown key code '%s'", name)}
+		return nil, ConfigError{msg: fmt.Sprintf("unknown key code '%s'", name)}
 	}
-	return code, nil
+	return []uint16{code}, nil
+}
+
+func modifierAlias() map[string][]uint16 {
+	return map[string][]uint16{
+		"ALT":     {uint16(linux.KeyLeftAlt), uint16(linux.KeyRightAlt)},
+		"CTRL":    {uint16(linux.KeyLeftCtrl), uint16(linux.KeyRightCtrl)},
+		"CONTROL": {uint16(linux.KeyLeftCtrl), uint16(linux.KeyRightCtrl)},
+		"SHIFT":   {uint16(linux.KeyLeftShift), uint16(linux.KeyRightShift)},
+		"META":    {uint16(linux.KeyLeftMeta), uint16(linux.KeyRightMeta)},
+	}
 }
 
 func keycodeTable() map[string]uint16 {

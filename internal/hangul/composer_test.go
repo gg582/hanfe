@@ -136,3 +136,35 @@ func TestHangulComposerDoubleMedial(t *testing.T) {
 		t.Fatalf("expected composed vowel to yield '와', got %q", result.Preedit)
 	}
 }
+
+func typeSequence(seq []rune) string {
+	composer := NewHangulComposer()
+	var out []rune
+	for _, ch := range seq {
+		result := composer.Feed(ch, RoleAuto)
+		out = append(out, []rune(result.Commit)...)
+	}
+	out = append(out, []rune(composer.Flush())...)
+	return string(out)
+}
+
+func TestHangulComposerMovesTrailingConsonantForward(t *testing.T) {
+	got := typeSequence([]rune{'ㅇ', 'ㅣ', 'ㅅ', 'ㅏ', 'ㅇ'})
+	if got != "이상" {
+		t.Fatalf("expected '이상', got %q", got)
+	}
+}
+
+func TestHangulComposerProducesNeunSyllable(t *testing.T) {
+	got := typeSequence([]rune{'ㄷ', 'ㅗ', 'ㅣ', 'ㄴ', 'ㅡ', 'ㄴ'})
+	if got != "되는" {
+		t.Fatalf("expected '되는', got %q", got)
+	}
+}
+
+func TestHangulComposerLeadingVowelSequence(t *testing.T) {
+	got := typeSequence([]rune{'ㅏ', 'ㅂ', 'ㅏ', 'ㄴ', 'ㅏ'})
+	if got != "아바나" {
+		t.Fatalf("expected '아바나', got %q", got)
+	}
+}

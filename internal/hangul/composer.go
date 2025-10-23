@@ -271,10 +271,11 @@ func (c *HangulComposer) handleVowel(ch rune) []rune {
 			c.trailing = nil
 			return commit
 		}
-		commit = c.compose()
-		c.leading = runePtr('ㅇ')
-		c.vowel = runePtr(ch)
+		trailing := *c.trailing
 		c.trailing = nil
+		commit = c.compose()
+		c.leading = runePtr(trailing)
+		c.vowel = runePtr(ch)
 		return commit
 	}
 
