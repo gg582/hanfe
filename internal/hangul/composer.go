@@ -159,9 +159,6 @@ func (c *HangulComposer) Backspace() (string, bool) {
 			c.vowel = runePtr(first)
 		} else {
 			c.vowel = nil
-			if c.leading != nil && *c.leading == 'ㅇ' {
-				c.leading = nil
-			}
 		}
 		return string(c.currentPreedit()), true
 	}
@@ -245,18 +242,9 @@ func (c *HangulComposer) handleConsonant(ch rune, role JamoRole) []rune {
 
 func (c *HangulComposer) handleVowel(ch rune) []rune {
 	var commit []rune
-	if c.leading == nil {
-		c.leading = runePtr('ㅇ')
-	}
 
 	if c.vowel == nil {
 		c.vowel = runePtr(ch)
-		return commit
-	}
-
-	pair := [2]rune{*c.vowel, ch}
-	if combined, ok := doubleMedial[pair]; ok {
-		c.vowel = runePtr(combined)
 		return commit
 	}
 
@@ -271,15 +259,23 @@ func (c *HangulComposer) handleVowel(ch rune) []rune {
 			c.trailing = nil
 			return commit
 		}
+		trailing := *c.trailing
+		c.trailing = nil
 		commit = c.compose()
-		c.leading = runePtr('ㅇ')
+		c.leading = runePtr(trailing)
 		c.vowel = runePtr(ch)
 		c.trailing = nil
 		return commit
 	}
 
+	pair := [2]rune{*c.vowel, ch}
+	if combined, ok := doubleMedial[pair]; ok {
+		c.vowel = runePtr(combined)
+		return commit
+	}
+
 	commit = c.compose()
-	c.leading = runePtr('ㅇ')
+	c.leading = nil
 	c.vowel = runePtr(ch)
 	c.trailing = nil
 	return commit
