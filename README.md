@@ -1,79 +1,77 @@
 # hanfe
 
-`hanfe`는 리눅스 evdev 키보드 이벤트를 가로채어 모든 환경(X11, Wayland, TTY)에서 사용할 수 있는 C++ 기반 한글 IME입니다. 실제 키보드 장치를 읽어 들여 두벌식 또는 세벌식(390) 자판 규칙에 맞춰 영어 입력을 한글 음절로 조합하고, 가상 uinput 키보드를 통해 다시 이벤트를 주입합니다. `Ctrl+Shift+U` 유니코드 시퀀스를 사용하므로 대부분의 애플리케이션에서 한글 입력이 동작하며, 필요하면 지정한 TTY에 직접 출력을 복제할 수도 있습니다.
+`hanfe` is a terminal friendly Hangul composer written in Go. The tool relies on
+ready-made Go packages for keyboard handling, Hangul syllable composition, and
+INI configuration parsing so you can compose Korean text without wiring low level
+Linux device code yourself.
 
-## 주요 기능
+The binary opens the current TTY in raw mode using
+[`github.com/eiannone/keyboard`](https://github.com/eiannone/keyboard), maps
+Dubeolsik key sequences through data shipped with
+[`github.com/suapapa/go_hangul`](https://github.com/suapapa/go_hangul), and lets
+you configure the toggle key via a simple INI file parsed by
+[`github.com/go-ini/ini`](https://github.com/go-ini/ini).
 
-- **두벌식 / 세벌식 390 자판 지원**: 두 레이아웃은 바이너리에 내장되어 있으며 실행 시 `--layout` 옵션으로 선택할 수 있습니다.
-- **프리에딧 시뮬레이션**: 조합 중인 글자를 가상 키보드로 입력한 뒤 백스페이스로 교체하여 IME를 인식하지 않는 프로그램에도 한글을 전달합니다.
-- **토글 키 지정**: `toggle.ini` 또는 `--toggle-config`로 한글/영문 전환 키를 설정할 수 있습니다. 기본값은 `KEY_RIGHTALT`와 `KEY_HANGUL` 조합입니다.
-- **TTY 미러 출력**: `--tty /dev/ttyX` 옵션으로 조합된 결과를 특정 TTY에도 동시에 기록할 수 있습니다.
-- **자동 키보드 감지**: `--device` 옵션을 생략하면 `/dev/input` 아래에서 키보드로 보이는 장치를 찾아 자동으로 사용합니다.
+## Features
 
-## 빌드
+- **Hangul composition** – Two-beolsik layout with combined vowels/finals handled
+  by the embedded `go_hangul` tables.
+- **Mode toggle** – Switch between English and Hangul modes with a configurable
+  key (default: `Ctrl+Space`).
+- **Terminal UI** – See the current buffer and mode status while typing in the
+  terminal. Press `Ctrl+C` or `Esc` to exit.
 
-필요 패키지: `cmake`, `g++`(C++20 지원). Ubuntu 기준 설치 예시는 다음과 같습니다.
+## Building
 
-```bash
-sudo apt-get update
-sudo apt-get install build-essential cmake
-```
-
-그 다음 프로젝트를 빌드합니다.
-
-```bash
-cmake -S . -B build
-cmake --build build
-```
-
-완료 후 실행 파일은 `build/hanfe`에 생성됩니다. 시스템 전역 설치가 필요하면 관리자 권한으로 다음을 실행할 수 있습니다.
+Go 1.22 or newer is recommended.
 
 ```bash
-sudo cmake --install build --prefix /usr
+go build ./...
 ```
 
-이는 `/usr/bin/hanfe`에 바이너리를 배치합니다.
-
-## 실행 예시
-
-기본적으로 `hanfe`는 `/dev/input/by-id/*-kbd` 등 키보드로 보이는 장치를 자동으로 선택합니다.
+The resulting binary lives at `./hanfe` when you build `cmd/hanfe`.
 
 ```bash
-sudo ./build/hanfe --layout dubeolsik
+go build -o hanfe ./cmd/hanfe
 ```
 
-주요 옵션:
+## Running
 
-- `--device PATH` : 가로챌 키보드 evdev 장치 경로 (생략하면 자동 감지, 감지 실패 시 직접 지정)
-- `--layout {dubeolsik|sebeolsik-390}` : 사용할 자판 (기본값 `dubeolsik`)
-- `--toggle-config PATH` : 토글 키 설정 파일 지정 (기본값은 현재 디렉터리의 `toggle.ini`, 없으면 내장 기본값 사용)
-- `--tty /dev/ttyX` : 결과를 지정한 TTY에도 동시에 출력
-- `--list-layouts` : 지원 레이아웃 목록 출력 후 종료
-- `-h, --help` : 사용법 출력
+By default the application looks for a `toggle.ini` file in the working
+directory. Missing files simply fall back to internal defaults.
 
-루트 권한이 있어야 대부분의 키보드 evdev 장치에 접근할 수 있습니다.
+```bash
+go run ./cmd/hanfe --layout dubeolsik
+```
 
-## 토글 키 설정
+Command-line options:
 
-토글 파일은 간단한 INI 포맷을 사용합니다. 기본 제공되는 `toggle.ini` 예시는 다음과 같습니다.
+- `--config PATH` – Path to an INI file that describes the toggle key and layout.
+- `--layout NAME` – Override the layout declared in the config (currently only
+  `dubeolsik` is available).
+
+While running, use the configured toggle key to switch between Hangul and
+English input. Hit `Enter` to print the current buffer on a new line.
+
+## Configuration
+
+The configuration file uses a very small INI subset. Example:
 
 ```ini
 [toggle]
-keys = KEY_RIGHTALT, KEY_HANGUL
-default_mode = hangul
+key = ctrl+space
+
+[layout]
+name = dubeolsik
 ```
 
-- `keys` : 쉼표로 구분된 `KEY_*` 이름 목록입니다. 첫 번째로 눌린 토글 키가 입력 모드를 전환합니다.
-- `default_mode` : 시작 모드 (`hangul` 또는 `latin`).
+The `[toggle]` section controls the key that flips between Hangul and English
+modes. Supported values are `ctrl+space`, `tab`, `space`, `enter`, or a single
+character (for example `` ` ``). The `[layout]` section chooses the keyboard
+layout.
 
-`alt_r`, `hangul`과 같은 일부 축약 이름도 사용할 수 있지만 가능하면 `KEY_*` 표기를 권장합니다.
+## Testing
 
-## 레이아웃 메모
-
-두벌식과 세벌식 390 매핑은 `src/layout.cpp`에 하드코딩되어 있습니다. 필요하다면 해당 파일을 수정하여 키 매핑을 조정하거나 새로운 레이아웃을 추가한 뒤 `load_layout` 함수를 확장할 수 있습니다.
-
-## 주의 사항
-
-- 장치를 독점(grab)하므로 실행 중에는 다른 IME가 동일 장치를 사용하지 않도록 하세요.
-- `Ctrl+Shift+U` 기반 입력이 비활성화된 환경에서는 별도 설정이 필요할 수 있습니다.
-- Wayland 보안 정책에 따라 루트 권한 또는 추가 권한 부여가 필요할 수 있습니다.
+```bash
+go test ./...
+```
