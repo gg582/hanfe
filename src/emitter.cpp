@@ -157,7 +157,7 @@ void FallbackEmitter::type_unicode(char32_t codepoint) {
         }
         tap_key(it->second);
     }
-    tap_key(KEY_SPACE);
+    tap_key(KEY_ENTER);
 }
 
 void FallbackEmitter::write_tty(const std::string& text) {
