@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(hanfe LANGUAGES CXX)
+project(hanfe LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -11,7 +11,7 @@ add_executable(hanfe
     src/config.cpp
     src/composer.cpp
     src/layout.cpp
-    src/emitter.cpp
+    src/emitter.c
     src/engine.cpp
     src/device.cpp
     src/util.cpp

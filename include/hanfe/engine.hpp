@@ -11,15 +11,21 @@
 
 #include "hanfe/composer.hpp"
 #include "hanfe/config.hpp"
-#include "hanfe/emitter.hpp"
+#include "hanfe/emitter.h"
 #include "hanfe/layout.hpp"
 
 namespace hanfe {
 
+struct FallbackEmitterDeleter {
+    void operator()(fallback_emitter* emitter) const;
+};
+
+using FallbackEmitterPtr = std::unique_ptr<fallback_emitter, FallbackEmitterDeleter>;
+
 class HanfeEngine {
    public:
     HanfeEngine(int device_fd, Layout layout, ToggleConfig toggle,
-                std::unique_ptr<FallbackEmitter> emitter);
+                FallbackEmitterPtr emitter);
 
     void run();
 
@@ -49,7 +55,7 @@ class HanfeEngine {
     int device_fd_;
     Layout layout_;
     ToggleConfig toggle_;
-    std::unique_ptr<FallbackEmitter> emitter_;
+    FallbackEmitterPtr emitter_;
 
     HangulComposer composer_;
     InputMode mode_;

@@ -1,20 +1,36 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <filesystem>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <system_error>
+#include <cstring>
 
 #include "hanfe/cli.hpp"
 #include "hanfe/config.hpp"
 #include "hanfe/device.hpp"
 #include "hanfe/engine.hpp"
+#include "hanfe/emitter.h"
 #include "hanfe/layout.hpp"
 
 namespace hanfe {
 namespace {
+
+int hex_index(char ch) {
+    if (ch >= '0' && ch <= '9') {
+        return ch - '0';
+    }
+    if (ch >= 'a' && ch <= 'f') {
+        return 10 + (ch - 'a');
+    }
+    if (ch >= 'A' && ch <= 'F') {
+        return 10 + (ch - 'A');
+    }
+    return -1;
+}
 
 ToggleConfig resolve_toggle_config(const CliOptions& options) {
     if (options.toggle_config_path) {
@@ -103,7 +119,26 @@ int main(int argc, char** argv) {
         }
         FdHolder device_fd(fd_raw);
 
-        auto emitter = std::make_unique<FallbackEmitter>(unicode_hex_keycodes(), options.tty_path);
+        int hex_keycodes[16];
+        for (int i = 0; i < 16; ++i) {
+            hex_keycodes[i] = -1;
+        }
+        auto hex_map = unicode_hex_keycodes();
+        for (const auto& entry : hex_map) {
+            int idx = hex_index(entry.first);
+            if (idx >= 0) {
+                hex_keycodes[idx] = entry.second;
+            }
+        }
+
+        const char* tty_path = options.tty_path ? options.tty_path->c_str() : nullptr;
+        fallback_emitter* raw_emitter = fallback_emitter_open(hex_keycodes, tty_path);
+        if (!raw_emitter) {
+            int err = errno;
+            throw std::runtime_error("Failed to create fallback emitter: " +
+                                     std::string(std::strerror(err)));
+        }
+        FallbackEmitterPtr emitter(raw_emitter);
         HanfeEngine engine(device_fd.fd, std::move(layout), std::move(toggle), std::move(emitter));
         engine.run();
     } catch (const ConfigError& err) {
