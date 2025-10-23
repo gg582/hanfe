@@ -2,101 +2,158 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"os"
-	"syscall"
+	"strings"
 
-	"hanfe/internal/cli"
-	"hanfe/internal/config"
-	"hanfe/internal/device"
-	"hanfe/internal/emitter"
-	"hanfe/internal/engine"
-	"hanfe/internal/layout"
+	input "github.com/eiannone/keyboard"
+	hangulkeyboard "github.com/suapapa/go_hangul/keyboard"
+
+	"hanfe/pkg/config"
+	"hanfe/pkg/ime"
 )
 
-func main() {
-	os.Exit(run(os.Args))
+type toggleSpec struct {
+	key  input.Key
+	rune rune
 }
 
-func run(args []string) int {
-	opts, err := cli.Parse(args)
+func (t toggleSpec) matches(r rune, k input.Key) bool {
+	if k != t.key {
+		return false
+	}
+	if k == input.KeyRune && t.rune != 0 {
+		return r == t.rune
+	}
+	return true
+}
+
+func parseToggleSpec(value string) toggleSpec {
+	v := strings.ToLower(strings.TrimSpace(value))
+	switch v {
+	case "tab":
+		return toggleSpec{key: input.KeyTab}
+	case "space":
+		return toggleSpec{key: input.KeySpace}
+	case "ctrl+space":
+		return toggleSpec{key: input.KeyCtrlSpace}
+	case "enter":
+		return toggleSpec{key: input.KeyEnter}
+	}
+
+	runes := []rune(v)
+	if len(runes) == 1 {
+		return toggleSpec{key: input.KeyRune, rune: runes[0]}
+	}
+	return toggleSpec{key: input.KeyCtrlSpace}
+}
+
+func main() {
+	cfgPath := flag.String("config", "toggle.ini", "Path to configuration file")
+	layoutName := flag.String("layout", "", "Keyboard layout to use")
+	flag.Parse()
+
+	cfg, err := config.Load(*cfgPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		fmt.Fprintln(os.Stderr, cli.Usage())
-		return 1
+		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)
+		os.Exit(1)
 	}
 
-	if opts.ShowHelp {
-		fmt.Println(cli.Usage())
-		fmt.Println()
-		fmt.Println("Available layouts:")
-		for _, name := range layout.AvailableLayouts() {
-			fmt.Printf("  %s\n", name)
+	if *layoutName != "" {
+		cfg.Layout = *layoutName
+	}
+
+	layout, ok := hangulkeyboard.ByName(cfg.Layout)
+	if !ok {
+		names := make([]string, 0, len(hangulkeyboard.Available()))
+		for _, l := range hangulkeyboard.Available() {
+			names = append(names, l.Name)
 		}
-		return 0
+		fmt.Fprintf(os.Stderr, "unknown layout %q. available: %s\n", cfg.Layout, strings.Join(names, ", "))
+		os.Exit(1)
 	}
 
-	if opts.ListLayouts {
-		for _, name := range layout.AvailableLayouts() {
-			fmt.Println(name)
+	toggle := parseToggleSpec(cfg.ToggleKey)
+
+	if err := input.Open(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to open keyboard: %v\n", err)
+		os.Exit(1)
+	}
+	defer input.Close()
+
+	composer := ime.NewComposer(layout)
+	hangulMode := true
+
+	fmt.Printf("hanfe ready (layout=%s, toggle=%s)\n", layout.Name, cfg.ToggleKey)
+	fmt.Println("Press Ctrl+C or Esc to exit.")
+	redraw := func() {
+		status := "[ENG]"
+		if hangulMode {
+			status = "[KOR]"
 		}
-		return 0
+		text := composer.Text()
+		fmt.Printf("\r%s %s", status, text)
+		fmt.Printf("\x1b[K")
+		os.Stdout.Sync()
 	}
 
-	lay, err := layout.Load(opts.LayoutName)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return 1
-	}
+	redraw()
 
-	toggleCfg, err := config.ResolveToggleConfig(opts.ToggleConfigPath)
-	if err != nil {
-		var cfgErr config.ConfigError
-		if errors.As(err, &cfgErr) {
-			fmt.Fprintf(os.Stderr, "Configuration error: %s\n", cfgErr.Error())
-			return 2
-		}
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return 1
-	}
-
-	devicePath := opts.DevicePath
-	if devicePath == "" {
-		detected, err := device.DetectKeyboardDevice()
+	for {
+		r, key, err := input.GetSingleKey()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: failed to auto-detect a keyboard device")
-			if err.Error() != "" {
-				fmt.Fprintf(os.Stderr, ": %v", err)
+			if errors.Is(err, io.EOF) {
+				fmt.Println()
+				return
 			}
-			fmt.Fprintln(os.Stderr, "\nProvide --device /dev/input/eventX explicitly.")
-			return 1
+			fmt.Fprintf(os.Stderr, "keyboard read error: %v\n", err)
+			fmt.Println()
+			return
 		}
-		devicePath = detected.Path
-		fmt.Printf("Auto-detected keyboard device: %s", detected.Path)
-		if detected.Name != "" {
-			fmt.Printf(" [%s]", detected.Name)
+
+		if key == input.KeyCtrlC || key == input.KeyEsc {
+			fmt.Println()
+			return
 		}
-		fmt.Println()
-	}
 
-	fd, err := syscall.Open(devicePath, syscall.O_RDONLY|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: failed to open device '%s': %v\n", devicePath, err)
-		return 1
-	}
-	defer syscall.Close(fd)
+		if toggle.matches(r, key) {
+			composer.FlushText()
+			hangulMode = !hangulMode
+			redraw()
+			continue
+		}
 
-	emitterInstance, err := emitter.Open(layout.UnicodeHexKeycodes(), opts.TTYPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: failed to create fallback emitter: %v\n", err)
-		return 1
-	}
-	defer emitterInstance.Close()
+		switch key {
+		case input.KeyBackspace:
+			composer.Backspace()
+		case input.KeyEnter:
+			line := composer.FlushText()
+			status := "[ENG]"
+			if hangulMode {
+				status = "[KOR]"
+			}
+			fmt.Printf("\r%s %s\n", status, line)
+			composer.Reset()
+		case input.KeySpace:
+			composer.Space()
+		case input.KeyTab:
+			composer.AppendLiteral('\t')
+		case input.KeyRune:
+			if hangulMode {
+				if !composer.TypeKey(r) {
+					composer.AppendLiteral(r)
+				}
+			} else {
+				composer.AppendLiteral(r)
+			}
+		case input.KeyUnknown:
+			continue
+		default:
+			continue
+		}
 
-	eng := engine.NewEngine(fd, lay, toggleCfg, emitterInstance)
-	if err := eng.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		return 1
+		redraw()
 	}
-	return 0
 }
