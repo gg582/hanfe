@@ -139,25 +139,53 @@ void FallbackEmitter::send_text(const std::string& text) {
     }
 }
 
-void FallbackEmitter::type_unicode(char32_t codepoint) {
-    std::ostringstream oss;
-    oss << std::hex << std::nouppercase << static_cast<uint32_t>(codepoint);
-    std::string hex = oss.str();
+// Helper: convert codepoint -> UTF-8
+static std::string codepoint_to_utf8(char32_t cp) {
+    std::string out;
+    if (cp <= 0x7F) {
+        out.push_back(static_cast<char>(cp));
+    } else if (cp <= 0x7FF) {
+        out.push_back(static_cast<char>(0xC0 | ((cp >> 6) & 0x1F)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    } else if (cp <= 0xFFFF) {
+        out.push_back(static_cast<char>(0xE0 | ((cp >> 12) & 0x0F)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    } else {
+        out.push_back(static_cast<char>(0xF0 | ((cp >> 18) & 0x07)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    }
+    return out;
+}
 
+void FallbackEmitter::type_unicode(char32_t codepoint) {
+    // keep original modifier+U sequence so GUI fallback stays intact
     send_key_state(KEY_LEFTCTRL, true);
     send_key_state(KEY_LEFTSHIFT, true);
     tap_key(KEY_U);
     send_key_state(KEY_LEFTSHIFT, false);
     send_key_state(KEY_LEFTCTRL, false);
 
+    // write the real UTF-8 to TTY for visibility/logging
+    write_tty(codepoint_to_utf8(codepoint));
+
+    // *** If a TTY is open, DO NOT type hex digits (they would duplicate / conflict) ***
+    if (tty_fd_) {
+        return;
+    }
+
+    // Otherwise (no tty), fall back to typing hex digits as before
+    std::ostringstream oss;
+    oss << std::hex << std::nouppercase << static_cast<uint32_t>(codepoint);
+    std::string hex = oss.str();
+
     for (char ch : hex) {
         auto it = hex_keys_.find(ch);
-        if (it == hex_keys_.end()) {
-            continue;
-        }
+        if (it == hex_keys_.end()) continue;
         tap_key(it->second);
     }
-    tap_key(KEY_SPACE);
 }
 
 void FallbackEmitter::write_tty(const std::string& text) {
