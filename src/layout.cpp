@@ -8,7 +8,8 @@
 namespace hanfe {
 namespace {
 
-LayoutSymbol make_text_symbol(const std::string& value, bool commit_before = true) {
+[[maybe_unused]] LayoutSymbol make_text_symbol(const std::string& value,
+                                               bool commit_before = true) {
     LayoutSymbol symbol;
     symbol.kind = SymbolKind::Text;
     symbol.text = value;
@@ -64,14 +65,14 @@ Layout build_dubeolsik() {
 
     {
         LayoutEntry entry;
-        entry.normal = make_text_symbol(";");
-        entry.shifted = make_text_symbol(":");
+        entry.normal = make_passthrough_symbol();
+        entry.shifted = make_passthrough_symbol();
         mapping.emplace(KEY_SEMICOLON, entry);
     }
     {
         LayoutEntry entry;
-        entry.normal = make_text_symbol("'");
-        entry.shifted = make_text_symbol("\"");
+        entry.normal = make_passthrough_symbol();
+        entry.shifted = make_passthrough_symbol();
         mapping.emplace(KEY_APOSTROPHE, entry);
     }
 
@@ -85,57 +86,57 @@ Layout build_dubeolsik() {
 
     {
         LayoutEntry entry;
-        entry.normal = make_text_symbol(",");
-        entry.shifted = make_text_symbol("<");
+        entry.normal = make_passthrough_symbol();
+        entry.shifted = make_passthrough_symbol();
         mapping.emplace(KEY_COMMA, entry);
     }
     {
         LayoutEntry entry;
-        entry.normal = make_text_symbol(".");
-        entry.shifted = make_text_symbol(">");
+        entry.normal = make_passthrough_symbol();
+        entry.shifted = make_passthrough_symbol();
         mapping.emplace(KEY_DOT, entry);
     }
     {
         LayoutEntry entry;
-        entry.normal = make_text_symbol("/");
-        entry.shifted = make_text_symbol("?");
+        entry.normal = make_passthrough_symbol();
+        entry.shifted = make_passthrough_symbol();
         mapping.emplace(KEY_SLASH, entry);
     }
 
-    add(KEY_SPACE, make_text_symbol(" "));
+    add(KEY_SPACE, make_passthrough_symbol());
 
-    auto add_number = [&](int key, const std::string& normal, const std::string& shifted) {
+    auto add_passthrough_pair = [&](int key) {
         LayoutEntry entry;
-        entry.normal = make_text_symbol(normal);
-        entry.shifted = make_text_symbol(shifted);
+        entry.normal = make_passthrough_symbol();
+        entry.shifted = make_passthrough_symbol();
         mapping.emplace(key, entry);
     };
 
-    add_number(KEY_1, "1", "!");
-    add_number(KEY_2, "2", "@");
-    add_number(KEY_3, "3", "#");
-    add_number(KEY_4, "4", "$");
-    add_number(KEY_5, "5", "%");
-    add_number(KEY_6, "6", "^");
-    add_number(KEY_7, "7", "&");
-    add_number(KEY_8, "8", "*");
-    add_number(KEY_9, "9", "(");
-    add_number(KEY_0, "0", ")");
-    add_number(KEY_MINUS, "-", "_");
-    add_number(KEY_EQUAL, "=", "+");
-    add_number(KEY_LEFTBRACE, "[", "{");
-    add_number(KEY_RIGHTBRACE, "]", "}");
+    add_passthrough_pair(KEY_1);
+    add_passthrough_pair(KEY_2);
+    add_passthrough_pair(KEY_3);
+    add_passthrough_pair(KEY_4);
+    add_passthrough_pair(KEY_5);
+    add_passthrough_pair(KEY_6);
+    add_passthrough_pair(KEY_7);
+    add_passthrough_pair(KEY_8);
+    add_passthrough_pair(KEY_9);
+    add_passthrough_pair(KEY_0);
+    add_passthrough_pair(KEY_MINUS);
+    add_passthrough_pair(KEY_EQUAL);
+    add_passthrough_pair(KEY_LEFTBRACE);
+    add_passthrough_pair(KEY_RIGHTBRACE);
 
     {
         LayoutEntry entry;
-        entry.normal = make_text_symbol("\\");
-        entry.shifted = make_text_symbol("|");
+        entry.normal = make_passthrough_symbol();
+        entry.shifted = make_passthrough_symbol();
         mapping.emplace(KEY_BACKSLASH, entry);
     }
     {
         LayoutEntry entry;
-        entry.normal = make_text_symbol("`");
-        entry.shifted = make_text_symbol("~");
+        entry.normal = make_passthrough_symbol();
+        entry.shifted = make_passthrough_symbol();
         mapping.emplace(KEY_GRAVE, entry);
     }
 
@@ -157,22 +158,27 @@ Layout build_sebeolsik_390() {
         mapping.emplace(key, entry);
     };
 
-    auto text = [](const std::string& value) { return make_text_symbol(value); };
+    auto passthrough_pair = [&mapping](int key) {
+        LayoutEntry entry;
+        entry.normal = make_passthrough_symbol();
+        entry.shifted = make_passthrough_symbol();
+        mapping.emplace(key, entry);
+    };
     auto jamo = [](char32_t value) { return make_jamo_symbol(value); };
 
-    set_entry(KEY_GRAVE, text("`"), make_text_symbol("~"));
-    set_entry(KEY_1, text("1"), make_text_symbol("!"));
-    set_entry(KEY_2, text("2"), make_text_symbol("@"));
-    set_entry(KEY_3, text("3"), make_text_symbol("#"));
-    set_entry(KEY_4, text("4"), make_text_symbol("$"));
-    set_entry(KEY_5, text("5"), make_text_symbol("%"));
-    set_entry(KEY_6, text("6"), make_text_symbol("^"));
-    set_entry(KEY_7, text("7"), make_text_symbol("&"));
-    set_entry(KEY_8, text("8"), make_text_symbol("*"));
-    set_entry(KEY_9, text("9"), make_text_symbol("("));
-    set_entry(KEY_0, text("0"), make_text_symbol(")"));
-    set_entry(KEY_MINUS, text("-"), make_text_symbol("_"));
-    set_entry(KEY_EQUAL, text("="), make_text_symbol("+"));
+    passthrough_pair(KEY_GRAVE);
+    passthrough_pair(KEY_1);
+    passthrough_pair(KEY_2);
+    passthrough_pair(KEY_3);
+    passthrough_pair(KEY_4);
+    passthrough_pair(KEY_5);
+    passthrough_pair(KEY_6);
+    passthrough_pair(KEY_7);
+    passthrough_pair(KEY_8);
+    passthrough_pair(KEY_9);
+    passthrough_pair(KEY_0);
+    passthrough_pair(KEY_MINUS);
+    passthrough_pair(KEY_EQUAL);
 
     set_entry(KEY_Q, jamo(U'ㅂ'), make_jamo_symbol(U'ㅃ'));
     set_entry(KEY_W, jamo(U'ㅈ'), make_jamo_symbol(U'ㅉ'));
@@ -189,7 +195,7 @@ Layout build_sebeolsik_390() {
     {
         LayoutEntry entry;
         entry.normal = jamo(U'ㅢ');
-        entry.shifted = make_text_symbol("|");
+        entry.shifted = make_passthrough_symbol();
         mapping.emplace(KEY_BACKSLASH, entry);
     }
 
@@ -228,11 +234,11 @@ Layout build_sebeolsik_390() {
     {
         LayoutEntry entry;
         entry.normal = jamo(U'ㅟ');
-        entry.shifted = make_text_symbol("?");
+        entry.shifted = make_passthrough_symbol();
         mapping.emplace(KEY_SLASH, entry);
     }
 
-    set_entry(KEY_SPACE, text(" "), std::nullopt);
+    set_entry(KEY_SPACE, make_passthrough_symbol(), std::nullopt);
 
     mapping.emplace(KEY_ENTER, LayoutEntry{make_passthrough_symbol(), std::nullopt});
     mapping.emplace(KEY_TAB, LayoutEntry{make_passthrough_symbol(), std::nullopt});
