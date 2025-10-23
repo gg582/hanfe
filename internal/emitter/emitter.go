@@ -8,12 +8,13 @@ import (
 	"unsafe"
 
 	"hanfe/internal/linux"
+	"hanfe/internal/ttybridge"
 	"hanfe/internal/util"
 )
 
 type FallbackEmitter struct {
 	uinputFD    int
-	ttyFD       int
+	ttyClient   *ttybridge.Client
 	ptyFD       int
 	closed      bool
 	hexKeycodes [16]int
@@ -41,8 +42,8 @@ type uinputUserDev struct {
 	Absflat      [absCnt]int32
 }
 
-func Open(hexMap map[rune]uint16, ttyPath, ptyPath string) (*FallbackEmitter, error) {
-	emitter := &FallbackEmitter{uinputFD: -1, ttyFD: -1, ptyFD: -1}
+func Open(hexMap map[rune]uint16, ttyClient *ttybridge.Client, ptyPath string) (*FallbackEmitter, error) {
+	emitter := &FallbackEmitter{uinputFD: -1, ttyClient: ttyClient, ptyFD: -1}
 	for i := range emitter.hexKeycodes {
 		emitter.hexKeycodes[i] = -1
 	}
@@ -64,13 +65,13 @@ func Open(hexMap map[rune]uint16, ttyPath, ptyPath string) (*FallbackEmitter, er
 		return nil, err
 	}
 
-	if ttyPath != "" {
-		ttyFD, err := syscall.Open(ttyPath, syscall.O_WRONLY|syscall.O_CLOEXEC, 0)
+	if ptyPath != "" {
+		ptyFD, err := syscall.Open(ptyPath, syscall.O_WRONLY|syscall.O_CLOEXEC, 0)
 		if err != nil {
 			emitter.Close()
-			return nil, fmt.Errorf("open tty %s: %w", ttyPath, err)
+			return nil, fmt.Errorf("open pty %s: %w", ptyPath, err)
 		}
-		emitter.ttyFD = ttyFD
+		emitter.ptyFD = ptyFD
 	}
 
 	if ptyPath != "" {
@@ -126,9 +127,13 @@ func (e *FallbackEmitter) Close() error {
 		syscall.Close(e.uinputFD)
 		e.uinputFD = -1
 	}
-	if e.ttyFD >= 0 {
-		syscall.Close(e.ttyFD)
-		e.ttyFD = -1
+	if e.ttyClient != nil {
+		_ = e.ttyClient.Close()
+		e.ttyClient = nil
+	}
+	if e.ptyFD >= 0 {
+		syscall.Close(e.ptyFD)
+		e.ptyFD = -1
 	}
 	if e.ptyFD >= 0 {
 		syscall.Close(e.ptyFD)
@@ -211,31 +216,6 @@ func (e *FallbackEmitter) SendText(text string) error {
 	return e.flushBuffer()
 }
 
-func (e *FallbackEmitter) ttyWriteBytes(data string) error {
-	if e.ttyFD < 0 {
-		return nil
-	}
-	for i := 0; i < len(data); i++ {
-		if err := e.ttyPushByte(data[i]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (e *FallbackEmitter) ttyPushByte(b byte) error {
-	if e.ttyFD < 0 {
-		return nil
-	}
-	_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, uintptr(e.ttyFD), uintptr(syscall.TIOCSTI), uintptr(unsafe.Pointer(&b)))
-	if errno != 0 {
-		if _, err := syscall.Write(e.ttyFD, []byte{b}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (e *FallbackEmitter) ptyWriteBytes(data string) error {
 	if e.ptyFD < 0 || data == "" {
 		return nil
@@ -273,7 +253,7 @@ func (e *FallbackEmitter) ptyPushByte(b byte) error {
 }
 
 func (e *FallbackEmitter) mirrorWrite(data string) error {
-	if err := e.ttyWriteBytes(data); err != nil {
+	if err := e.ttyClient.WriteString(data); err != nil {
 		return err
 	}
 	if err := e.ptyWriteBytes(data); err != nil {
@@ -283,7 +263,7 @@ func (e *FallbackEmitter) mirrorWrite(data string) error {
 }
 
 func (e *FallbackEmitter) mirrorBackspace() error {
-	if err := e.ttyPushByte('\b'); err != nil {
+	if err := e.ttyClient.SendBackspace(1); err != nil {
 		return err
 	}
 	if err := e.ptyPushByte('\b'); err != nil {
