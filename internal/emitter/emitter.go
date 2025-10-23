@@ -2,6 +2,7 @@ package emitter
 
 import (
 	"fmt"
+	"strings"
 	"syscall"
 	"unicode/utf8"
 	"unsafe"
@@ -13,8 +14,10 @@ import (
 type FallbackEmitter struct {
 	uinputFD    int
 	ttyFD       int
+	ptyFD       int
 	closed      bool
 	hexKeycodes [16]int
+	inputBuffer strings.Builder
 }
 
 const (
@@ -38,8 +41,8 @@ type uinputUserDev struct {
 	Absflat      [absCnt]int32
 }
 
-func Open(hexMap map[rune]uint16, ttyPath string) (*FallbackEmitter, error) {
-	emitter := &FallbackEmitter{uinputFD: -1, ttyFD: -1}
+func Open(hexMap map[rune]uint16, ttyPath, ptyPath string) (*FallbackEmitter, error) {
+	emitter := &FallbackEmitter{uinputFD: -1, ttyFD: -1, ptyFD: -1}
 	for i := range emitter.hexKeycodes {
 		emitter.hexKeycodes[i] = -1
 	}
@@ -68,6 +71,15 @@ func Open(hexMap map[rune]uint16, ttyPath string) (*FallbackEmitter, error) {
 			return nil, fmt.Errorf("open tty %s: %w", ttyPath, err)
 		}
 		emitter.ttyFD = ttyFD
+	}
+
+	if ptyPath != "" {
+		ptyFD, err := syscall.Open(ptyPath, syscall.O_WRONLY|syscall.O_CLOEXEC, 0)
+		if err != nil {
+			emitter.Close()
+			return nil, fmt.Errorf("open pty %s: %w", ptyPath, err)
+		}
+		emitter.ptyFD = ptyFD
 	}
 
 	return emitter, nil
@@ -108,6 +120,7 @@ func (e *FallbackEmitter) Close() error {
 		return nil
 	}
 	e.closed = true
+	_ = e.flushBuffer()
 	if e.uinputFD >= 0 {
 		_ = linux.IoctlSetInt(e.uinputFD, linux.UIDevDestroy, 0)
 		syscall.Close(e.uinputFD)
@@ -116,6 +129,10 @@ func (e *FallbackEmitter) Close() error {
 	if e.ttyFD >= 0 {
 		syscall.Close(e.ttyFD)
 		e.ttyFD = -1
+	}
+	if e.ptyFD >= 0 {
+		syscall.Close(e.ptyFD)
+		e.ptyFD = -1
 	}
 	return nil
 }
@@ -159,11 +176,14 @@ func (e *FallbackEmitter) emitSync() error {
 }
 
 func (e *FallbackEmitter) SendBackspace(count int) error {
+	if err := e.flushBuffer(); err != nil {
+		return err
+	}
 	for i := 0; i < count; i++ {
 		if err := e.TapKey(uint16(linux.KeyBackspace)); err != nil {
 			return err
 		}
-		if err := e.ttyPushByte('\b'); err != nil {
+		if err := e.mirrorBackspace(); err != nil {
 			return err
 		}
 	}
@@ -174,21 +194,21 @@ func (e *FallbackEmitter) SendText(text string) error {
 	if text == "" {
 		return nil
 	}
-	for len(text) > 0 {
-		r, size := utf8.DecodeRuneInString(text)
+	e.inputBuffer.WriteString(text)
+	remaining := text
+	for len(remaining) > 0 {
+		r, size := utf8.DecodeRuneInString(remaining)
 		if r == utf8.RuneError && size == 1 {
+			e.inputBuffer.Reset()
 			return fmt.Errorf("invalid utf-8 sequence")
 		}
-		segment := text[:size]
-		if err := e.ttyWriteBytes(segment); err != nil {
-			return err
-		}
 		if err := e.typeUnicode(r); err != nil {
+			e.inputBuffer.Reset()
 			return err
 		}
-		text = text[size:]
+		remaining = remaining[size:]
 	}
-	return nil
+	return e.flushBuffer()
 }
 
 func (e *FallbackEmitter) ttyWriteBytes(data string) error {
@@ -214,6 +234,74 @@ func (e *FallbackEmitter) ttyPushByte(b byte) error {
 		}
 	}
 	return nil
+}
+
+func (e *FallbackEmitter) ptyWriteBytes(data string) error {
+	if e.ptyFD < 0 || data == "" {
+		return nil
+	}
+	buf := []byte(data)
+	for len(buf) > 0 {
+		n, err := syscall.Write(e.ptyFD, buf)
+		if err != nil {
+			if err == syscall.EINTR {
+				continue
+			}
+			return err
+		}
+		buf = buf[n:]
+	}
+	return nil
+}
+
+func (e *FallbackEmitter) ptyPushByte(b byte) error {
+	if e.ptyFD < 0 {
+		return nil
+	}
+	buf := []byte{b}
+	for len(buf) > 0 {
+		n, err := syscall.Write(e.ptyFD, buf)
+		if err != nil {
+			if err == syscall.EINTR {
+				continue
+			}
+			return err
+		}
+		buf = buf[n:]
+	}
+	return nil
+}
+
+func (e *FallbackEmitter) mirrorWrite(data string) error {
+	if err := e.ttyWriteBytes(data); err != nil {
+		return err
+	}
+	if err := e.ptyWriteBytes(data); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (e *FallbackEmitter) mirrorBackspace() error {
+	if err := e.ttyPushByte('\b'); err != nil {
+		return err
+	}
+	if err := e.ptyPushByte('\b'); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (e *FallbackEmitter) flushBuffer() error {
+	if e.inputBuffer.Len() == 0 {
+		return nil
+	}
+	data := e.inputBuffer.String()
+	e.inputBuffer.Reset()
+	if data == "" {
+		return nil
+	}
+	return e.mirrorWrite(data)
 }
 
 func (e *FallbackEmitter) typeUnicode(r rune) error {

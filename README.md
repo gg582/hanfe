@@ -16,8 +16,8 @@ without proper input-context support still receive composed characters.
   `alt_r`, `hangul`, `ctrl+space`, `alt+space`). Each chord flips between Hangul
   and Latin modes when pressed.
 - **Daemon friendly** – Runs as a background service by default while keeping a
-  `--no-daemon` flag for foreground debugging. Optional `--tty` mirroring can
-  echo text back into a chosen terminal.
+  `--no-daemon` flag for foreground debugging. Optional `--tty` or `--pty`
+  mirroring can echo text back into a chosen terminal session.
 
 ## Building
 
@@ -43,6 +43,7 @@ Useful command-line options:
 - `--toggle-config PATH` – Path to a toggle configuration file (defaults to
   `./toggle.ini` when present).
 - `--tty PATH` – Mirror committed text into a TTY using `TIOCSTI` (optional).
+- `--pty PATH` – Mirror committed text into a PTY without exposing the Unicode hex sequence.
 - `--daemon` / `--no-daemon` – Control background execution (daemon mode is the
   default).
 - `--list-layouts` – Print available layouts and exit.
