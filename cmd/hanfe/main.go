@@ -82,7 +82,7 @@ func main() {
 	}
 	defer syscall.Close(fd)
 
-	fallback, err := emitter.Open(layout.UnicodeHexKeycodes(), opts.TTYPath)
+	fallback, err := emitter.Open(layout.UnicodeHexKeycodes(), opts.TTYPath, opts.PTYPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "hanfe: %v\n", err)
 		os.Exit(1)

@@ -12,6 +12,7 @@ type Options struct {
 	LayoutName       string
 	ToggleConfigPath string
 	TTYPath          string
+	PTYPath          string
 	Daemonize        bool
 }
 
@@ -56,6 +57,13 @@ func Parse(args []string) (Options, error) {
 			}
 			opts.TTYPath = value
 			i = next
+		case strings.HasPrefix(arg, "--pty"):
+			value, next, err := extractValue(arg, i, args)
+			if err != nil {
+				return Options{}, err
+			}
+			opts.PTYPath = value
+			i = next
 		default:
 			return Options{}, fmt.Errorf("unknown option: %s", arg)
 		}
@@ -82,6 +90,7 @@ Options:
   --layout NAME           Keyboard layout (default: dubeolsik)
   --toggle-config PATH    Path to toggle.ini (default: ./toggle.ini if present)
   --tty PATH              Optional TTY to mirror text output to
+  --pty PATH              Optional PTY to mirror committed text without raw hex
   --daemon                Run in the background (default)
   --no-daemon             Stay in the foreground
   --list-layouts          List available layouts
