@@ -132,7 +132,27 @@ func TestHangulComposerDoubleMedial(t *testing.T) {
 	if result.Commit != "" {
 		t.Fatalf("expected no commit while composing double medial, got %q", result.Commit)
 	}
-	if result.Preedit != "와" {
-		t.Fatalf("expected composed vowel to yield '와', got %q", result.Preedit)
+	if result.Preedit != "ㅘ" {
+		t.Fatalf("expected composed vowel to yield 'ㅘ', got %q", result.Preedit)
+	}
+}
+
+func TestHangulComposerNoAutoIeung(t *testing.T) {
+	composer := NewHangulComposer()
+
+	result := composer.Feed('ㅏ', RoleAuto)
+	if result.Commit != "" {
+		t.Fatalf("expected no commit for initial vowel, got %q", result.Commit)
+	}
+	if result.Preedit != "ㅏ" {
+		t.Fatalf("expected preedit to remain as vowel jamo, got %q", result.Preedit)
+	}
+
+	result = composer.Feed('ㅏ', RoleAuto)
+	if result.Commit != "ㅏ" {
+		t.Fatalf("expected previous vowel to commit when new vowel typed, got %q", result.Commit)
+	}
+	if result.Preedit != "ㅏ" {
+		t.Fatalf("expected new vowel preedit to be 'ㅏ', got %q", result.Preedit)
 	}
 }
