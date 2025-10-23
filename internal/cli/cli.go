@@ -12,10 +12,11 @@ type Options struct {
 	LayoutName       string
 	ToggleConfigPath string
 	TTYPath          string
+	Daemonize        bool
 }
 
 func Parse(args []string) (Options, error) {
-	opts := Options{}
+	opts := Options{Daemonize: true}
 	for i := 1; i < len(args); i++ {
 		arg := args[i]
 		switch {
@@ -23,6 +24,10 @@ func Parse(args []string) (Options, error) {
 			opts.ShowHelp = true
 		case arg == "--list-layouts":
 			opts.ListLayouts = true
+		case arg == "--daemon":
+			opts.Daemonize = true
+		case arg == "--no-daemon" || arg == "--foreground":
+			opts.Daemonize = false
 		case strings.HasPrefix(arg, "--device"):
 			value, next, err := extractValue(arg, i, args)
 			if err != nil {
@@ -77,6 +82,8 @@ Options:
   --layout NAME           Keyboard layout (default: dubeolsik)
   --toggle-config PATH    Path to toggle.ini (default: ./toggle.ini if present)
   --tty PATH              Optional TTY to mirror text output to
+  --daemon                Run in the background (default)
+  --no-daemon             Stay in the foreground
   --list-layouts          List available layouts
   -h, --help              Show this help message`
 }

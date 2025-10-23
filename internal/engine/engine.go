@@ -16,11 +16,10 @@ import (
 type Engine struct {
 	deviceFD           int
 	layout             layout.Layout
-	toggle             config.ToggleConfig
+	toggleChords       []config.ToggleChord
 	emitter            *emitter.FallbackEmitter
 	composer           *hangul.HangulComposer
 	mode               types.InputMode
-	toggleKeys         map[uint16]struct{}
 	modifierState      map[uint16]bool
 	forwardedModifiers map[uint16]bool
 	forwardedKeys      map[uint16]struct{}
@@ -50,21 +49,27 @@ func NewEngine(deviceFD int, layout layout.Layout, toggle config.ToggleConfig, e
 	eng := &Engine{
 		deviceFD:           deviceFD,
 		layout:             layout,
-		toggle:             toggle,
+		toggleChords:       toggle.Chords,
 		emitter:            emitter,
 		composer:           hangul.NewHangulComposer(),
 		mode:               toggle.DefaultMode,
-		toggleKeys:         make(map[uint16]struct{}),
 		modifierState:      make(map[uint16]bool),
 		forwardedModifiers: make(map[uint16]bool),
 		forwardedKeys:      make(map[uint16]struct{}),
 	}
-	for _, code := range toggle.ToggleKeys {
-		eng.toggleKeys[code] = struct{}{}
-	}
 	for _, code := range modifierKeys {
 		eng.modifierState[code] = false
 		eng.forwardedModifiers[code] = false
+	}
+	for _, chord := range toggle.Chords {
+		for _, group := range chord.ModifierGroups {
+			for _, code := range group {
+				if _, ok := eng.modifierState[code]; !ok {
+					eng.modifierState[code] = false
+					eng.forwardedModifiers[code] = false
+				}
+			}
+		}
 	}
 	return eng
 }
@@ -107,14 +112,14 @@ func (e *Engine) processEvent(event *util.InputEvent) error {
 		return nil
 	}
 
-	code := event.Code
-	if _, ok := e.toggleKeys[code]; ok {
+	if e.shouldToggle(event) {
 		if isKeyPress(event) {
 			return e.toggleMode()
 		}
 		return nil
 	}
 
+	code := event.Code
 	if contains(modifierKeys, code) {
 		return e.handleModifier(event)
 	}
@@ -266,6 +271,38 @@ func (e *Engine) modifiersActive(codes []uint16) bool {
 
 func (e *Engine) shiftActive() bool {
 	return e.modifiersActive(shiftKeys)
+}
+
+func (e *Engine) modifierGroupsActive(groups [][]uint16) bool {
+	for _, group := range groups {
+		active := false
+		for _, code := range group {
+			if e.modifierState[code] {
+				active = true
+				break
+			}
+		}
+		if !active {
+			return false
+		}
+	}
+	return true
+}
+
+func (e *Engine) shouldToggle(event *util.InputEvent) bool {
+	if !isKeyPress(event) {
+		return false
+	}
+	code := event.Code
+	for _, chord := range e.toggleChords {
+		if chord.Key != code {
+			continue
+		}
+		if len(chord.ModifierGroups) == 0 || e.modifierGroupsActive(chord.ModifierGroups) {
+			return true
+		}
+	}
+	return false
 }
 
 func (e *Engine) ensureShiftForwarded() error {
