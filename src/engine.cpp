@@ -6,6 +6,7 @@
 #include <cerrno>
 #include <cstring>
 #include <stdexcept>
+#include <string>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
@@ -13,6 +14,13 @@
 
 namespace hanfe {
 namespace {
+
+void ensure_ok(int rc, const char* what) {
+    if (rc != 0) {
+        int err = errno;
+        throw std::runtime_error(std::string(what) + ": " + std::string(strerror(err)));
+    }
+}
 
 const std::vector<int> SHIFT_KEYS = {KEY_LEFTSHIFT, KEY_RIGHTSHIFT};
 const std::vector<int> CTRL_KEYS = {KEY_LEFTCTRL, KEY_RIGHTCTRL};
@@ -34,8 +42,14 @@ bool is_key_release(const input_event& event) { return event.value == 0; }
 
 }  // namespace
 
+void FallbackEmitterDeleter::operator()(fallback_emitter* emitter) const {
+    if (emitter) {
+        fallback_emitter_destroy(emitter);
+    }
+}
+
 HanfeEngine::HanfeEngine(int device_fd, Layout layout, ToggleConfig toggle,
-                         std::unique_ptr<FallbackEmitter> emitter)
+                         FallbackEmitterPtr emitter)
     : device_fd_(device_fd),
       layout_(std::move(layout)),
       toggle_(std::move(toggle)),
@@ -77,17 +91,17 @@ void HanfeEngine::run() {
         }
     } catch (...) {
         ioctl(device_fd_, EVIOCGRAB, 0);
-        emitter_->close();
+        fallback_emitter_close(emitter_.get());
         throw;
     }
     ioctl(device_fd_, EVIOCGRAB, 0);
-    emitter_->close();
+    fallback_emitter_close(emitter_.get());
 }
 
 void HanfeEngine::process_event(const input_event& event) {
     if (event.type != EV_KEY) {
         if (mode_ == InputMode::Latin) {
-            emitter_->forward_event(event);
+            ensure_ok(fallback_emitter_forward_event(emitter_.get(), &event), "forward event");
         }
         return;
     }
@@ -221,7 +235,7 @@ void HanfeEngine::handle_key_press(const input_event& event) {
 }
 
 void HanfeEngine::forward_key_event(const input_event& event) {
-    emitter_->forward_event(event);
+    ensure_ok(fallback_emitter_forward_event(emitter_.get(), &event), "forward event");
     if (is_key_press(event)) {
         forwarded_keys_.insert(event.code);
     } else if (is_key_release(event)) {
@@ -254,7 +268,8 @@ void HanfeEngine::set_forwarded_modifier(int code, bool pressed) {
     if (it != forwarded_modifiers_.end() && it->second == pressed) {
         return;
     }
-    emitter_->send_key_state(code, pressed);
+    ensure_ok(fallback_emitter_send_key_state(emitter_.get(), code, pressed ? 1 : 0),
+              "set key state");
     forwarded_modifiers_[code] = pressed;
 }
 
@@ -309,11 +324,13 @@ void HanfeEngine::replace_preedit(const std::string& new_text) {
     if (!preedit_text_.empty()) {
         size_t old_count = utf8_to_u32(preedit_text_).size();
         if (old_count > 0) {
-            emitter_->send_backspace(static_cast<int>(old_count));
+            ensure_ok(fallback_emitter_send_backspace(emitter_.get(), static_cast<int>(old_count)),
+                      "send backspace");
         }
     }
     if (!new_text.empty()) {
-        emitter_->send_text(new_text);
+        ensure_ok(fallback_emitter_send_text(emitter_.get(), new_text.data(), new_text.size()),
+                  "send text");
     }
     preedit_text_ = new_text;
     restore_forwarded_modifiers(suspended);
@@ -324,7 +341,7 @@ void HanfeEngine::send_text(const std::string& text) {
         return;
     }
     auto suspended = suspend_forwarded_modifiers();
-    emitter_->send_text(text);
+    ensure_ok(fallback_emitter_send_text(emitter_.get(), text.data(), text.size()), "send text");
     restore_forwarded_modifiers(suspended);
 }
 
