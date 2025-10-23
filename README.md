@@ -1,25 +1,23 @@
 # hanfe
 
-`hanfe` is a terminal friendly Hangul composer written in Go. The tool relies on
-ready-made Go packages for keyboard handling, Hangul syllable composition, and
-INI configuration parsing so you can compose Korean text without wiring low level
-Linux device code yourself.
-
-The binary opens the current TTY in raw mode using
-[`github.com/eiannone/keyboard`](https://github.com/eiannone/keyboard), maps
-Dubeolsik key sequences through data shipped with
-[`github.com/suapapa/go_hangul`](https://github.com/suapapa/go_hangul), and lets
-you configure the toggle key via a simple INI file parsed by
-[`github.com/go-ini/ini`](https://github.com/go-ini/ini).
+`hanfe` is a Linux-wide Hangul IME daemon written in Go. The process grabs a
+physical keyboard through evdev, composes Hangul syllables on the fly, and
+re-injects finished text through a fallback `uinput` device so GUI applications
+without proper input-context support still receive composed characters.
 
 ## Features
 
-- **Hangul composition** – Two-beolsik layout with combined vowels/finals handled
-  by the embedded `go_hangul` tables.
-- **Mode toggle** – Switch between English and Hangul modes with a configurable
-  key (default: `Ctrl+Space`).
-- **Terminal UI** – See the current buffer and mode status while typing in the
-  terminal. Press `Ctrl+C` or `Esc` to exit.
+- **Global interception** – Grabs a keyboard evdev node and forwards events
+  through a virtual device, making Hangul available to any application that can
+  read key events.
+- **Hangul composition** – Includes 두벌식 (`dubeolsik`) and 세벌식 390
+  (`sebeolsik-390`) layouts with full consonant/vowel composition logic.
+- **Configurable toggle keys** – Choose one or more toggle chords (e.g.
+  `alt_r`, `hangul`, `ctrl+space`, `alt+space`). Each chord flips between Hangul
+  and Latin modes when pressed.
+- **Daemon friendly** – Runs as a background service by default while keeping a
+  `--no-daemon` flag for foreground debugging. Optional `--tty` mirroring can
+  echo text back into a chosen terminal.
 
 ## Building
 
@@ -29,46 +27,45 @@ Go 1.22 or newer is recommended.
 go build ./...
 ```
 
-The resulting binary lives at `./hanfe` when you build `cmd/hanfe`.
-
-```bash
-go build -o hanfe ./cmd/hanfe
-```
-
 ## Running
 
-By default the application looks for a `toggle.ini` file in the working
-directory. Missing files simply fall back to internal defaults.
+Root (or proper udev rules/capabilities) is typically required to access
+`/dev/input/event*` and `/dev/uinput`.
 
 ```bash
-go run ./cmd/hanfe --layout dubeolsik
+sudo ./hanfe --no-daemon
 ```
 
-Command-line options:
+Useful command-line options:
 
-- `--config PATH` – Path to an INI file that describes the toggle key and layout.
-- `--layout NAME` – Override the layout declared in the config (currently only
-  `dubeolsik` is available).
-
-While running, use the configured toggle key to switch between Hangul and
-English input. Hit `Enter` to print the current buffer on a new line.
+- `--device PATH` – Explicit evdev keyboard path (auto-detected when omitted).
+- `--layout NAME` – Keyboard layout (`dubeolsik` or `sebeolsik-390`).
+- `--toggle-config PATH` – Path to a toggle configuration file (defaults to
+  `./toggle.ini` when present).
+- `--tty PATH` – Mirror committed text into a TTY using `TIOCSTI` (optional).
+- `--daemon` / `--no-daemon` – Control background execution (daemon mode is the
+  default).
+- `--list-layouts` – Print available layouts and exit.
+- `-h`, `--help` – Show usage information.
 
 ## Configuration
 
-The configuration file uses a very small INI subset. Example:
+Toggle behavior is controlled through a minimal INI file. Example `toggle.ini`:
 
 ```ini
 [toggle]
-key = ctrl+space
-
-[layout]
-name = dubeolsik
+keys = alt_r, hangul, ctrl+space
+default_mode = hangul
 ```
 
-The `[toggle]` section controls the key that flips between Hangul and English
-modes. Supported values are `ctrl+space`, `tab`, `space`, `enter`, or a single
-character (for example `` ` ``). The `[layout]` section chooses the keyboard
-layout.
+Each entry under `keys` is a comma-separated chord. A chord can be a single key
+(`hangul`, `alt_r`) or a modifier plus trigger (`ctrl+space`, `alt+space`).
+Recognised modifiers are `alt`, `alt_l`, `alt_r`, `ctrl`, `ctrl_l`, `ctrl_r`,
+`shift`, and `meta`. The last token in a chord must resolve to a single key.
+
+`default_mode` chooses the initial input mode (`hangul` or `latin`). When the
+file is missing or malformed the daemon falls back to the internal defaults of
+`alt_r` and `hangul` toggles with Hangul mode enabled.
 
 ## Testing
 
