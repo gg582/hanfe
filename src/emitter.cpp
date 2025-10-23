@@ -171,12 +171,13 @@ void FallbackEmitter::type_unicode(char32_t codepoint) {
     // write the real UTF-8 to TTY for visibility/logging
     write_tty(codepoint_to_utf8(codepoint));
 
-    // *** If a TTY is open, DO NOT type hex digits (they would duplicate / conflict) ***
+    // If a TTY sink is active we already wrote UTF-8 above and should not
+    // synthesize the hex sequence (avoids double input / stray commits).
     if (tty_fd_) {
         return;
     }
 
-    // Otherwise (no tty), fall back to typing hex digits as before
+    // Otherwise type the Unicode codepoint via Ctrl+Shift+U hex sequence
     std::ostringstream oss;
     oss << std::hex << std::nouppercase << static_cast<uint32_t>(codepoint);
     std::string hex = oss.str();
@@ -186,6 +187,10 @@ void FallbackEmitter::type_unicode(char32_t codepoint) {
         if (it == hex_keys_.end()) continue;
         tap_key(it->second);
     }
+
+    // Commit the sequence with space, then erase it so no trailing whitespace remains.
+    tap_key(KEY_SPACE);
+    tap_key(KEY_BACKSPACE);
 }
 
 void FallbackEmitter::write_tty(const std::string& text) {
