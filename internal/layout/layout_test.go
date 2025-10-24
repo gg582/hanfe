@@ -10,7 +10,7 @@ import (
 func TestAvailableLayouts(t *testing.T) {
 	names := AvailableLayouts()
 
-	expected := []string{"dubeolsik", "sebeolsik-390"}
+	expected := []string{"dubeolsik", "kana-86", "latin", "sebeolsik-390"}
 	if len(names) != len(expected) {
 		t.Fatalf("expected %d layouts, got %d", len(expected), len(names))
 	}
@@ -65,5 +65,19 @@ func TestLoadSebeolsikTrailingRole(t *testing.T) {
 func TestLoadUnknownLayout(t *testing.T) {
 	if _, err := Load("does-not-exist"); err == nil {
 		t.Fatalf("expected error for unknown layout")
+	}
+}
+
+func TestApplyOverride(t *testing.T) {
+	lay, err := Load("latin")
+	if err != nil {
+		t.Fatalf("load latin: %v", err)
+	}
+	override := NewTextSymbol("å")
+	lay.ApplyOverride(uint16(linux.KeyA), false, override)
+
+	sym := lay.Translate(uint16(linux.KeyA), false)
+	if sym == nil || sym.Text != "å" {
+		t.Fatalf("expected override text 'å', got %#v", sym)
 	}
 }

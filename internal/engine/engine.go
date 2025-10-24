@@ -5,6 +5,7 @@ import (
 	"syscall"
 
 	"hanfe/internal/config"
+	"hanfe/internal/dbinput"
 	"hanfe/internal/emitter"
 	"hanfe/internal/hangul"
 	"hanfe/internal/layout"
@@ -15,15 +16,60 @@ import (
 
 type Engine struct {
 	deviceFD           int
-	layout             layout.Layout
 	toggleChords       []config.ToggleChord
-	emitter            *emitter.FallbackEmitter
-	composer           *hangul.HangulComposer
+	emitter            emitter.Output
+	profiles           []*profileState
+	currentProfile     int
 	mode               types.InputMode
 	modifierState      map[uint16]bool
 	forwardedModifiers map[uint16]bool
 	forwardedKeys      map[uint16]struct{}
 	preedit            string
+}
+
+type ProfileSpec struct {
+	Name       string
+	Mode       types.InputMode
+	Layout     *layout.Layout
+	Dictionary *dbinput.Dictionary
+}
+
+type profileState struct {
+	spec     ProfileSpec
+	composer *hangul.HangulComposer
+	session  *dbinput.Session
+}
+
+func (e *Engine) activeProfile() *profileState {
+	if len(e.profiles) == 0 {
+		return nil
+	}
+	if e.currentProfile < 0 || e.currentProfile >= len(e.profiles) {
+		e.currentProfile = 0
+	}
+	return e.profiles[e.currentProfile]
+}
+
+func (e *Engine) resolveDefaultProfile(mode types.InputMode) int {
+	for i, state := range e.profiles {
+		if state.spec.Mode == mode {
+			return i
+		}
+	}
+	return 0
+}
+
+func (e *Engine) resetProfileState(state *profileState) {
+	if state == nil {
+		return
+	}
+	if state.composer != nil {
+		state.composer.Flush()
+	}
+	if state.session != nil {
+		state.session.Reset()
+	}
+	_ = e.replacePreedit("")
 }
 
 var (
@@ -45,14 +91,28 @@ var (
 	alwaysForward = combine(combine(ctrlKeys, altKeys), metaKeys)
 )
 
-func NewEngine(deviceFD int, layout layout.Layout, toggle config.ToggleConfig, emitter *emitter.FallbackEmitter) *Engine {
+func NewEngine(deviceFD int, profiles []ProfileSpec, toggle config.ToggleConfig, emitter emitter.Output) *Engine {
+	if len(profiles) == 0 {
+		profiles = append(profiles, ProfileSpec{Name: "default", Mode: types.ModeLatin})
+	}
+
+	states := make([]*profileState, len(profiles))
+	for i, spec := range profiles {
+		state := &profileState{spec: spec}
+		if spec.Mode == types.ModeHangul {
+			state.composer = hangul.NewHangulComposer()
+		}
+		if spec.Mode == types.ModeDatabase && spec.Dictionary != nil {
+			state.session = spec.Dictionary.NewSession()
+		}
+		states[i] = state
+	}
+
 	eng := &Engine{
 		deviceFD:           deviceFD,
-		layout:             layout,
 		toggleChords:       toggle.Chords,
 		emitter:            emitter,
-		composer:           hangul.NewHangulComposer(),
-		mode:               toggle.DefaultMode,
+		profiles:           states,
 		modifierState:      make(map[uint16]bool),
 		forwardedModifiers: make(map[uint16]bool),
 		forwardedKeys:      make(map[uint16]struct{}),
@@ -71,6 +131,9 @@ func NewEngine(deviceFD int, layout layout.Layout, toggle config.ToggleConfig, e
 			}
 		}
 	}
+	eng.currentProfile = eng.resolveDefaultProfile(toggle.DefaultMode)
+	eng.mode = eng.activeProfile().spec.Mode
+	eng.resetProfileState(eng.activeProfile())
 	return eng
 }
 
@@ -106,7 +169,7 @@ func (e *Engine) Run() error {
 
 func (e *Engine) processEvent(event *util.InputEvent) error {
 	if event.Type != linux.EvKey {
-		if e.mode == types.ModeLatin {
+		if e.mode == types.ModeLatin || e.mode == types.ModeKana || e.mode == types.ModeDatabase {
 			return e.forwardKeyEvent(event)
 		}
 		return nil
@@ -165,22 +228,45 @@ func (e *Engine) handleModifier(event *util.InputEvent) error {
 }
 
 func (e *Engine) handleBackspace(event *util.InputEvent) error {
-	if e.mode == types.ModeLatin {
+	active := e.activeProfile()
+	if active == nil {
 		return e.forwardKeyEvent(event)
 	}
-	if isKeyRelease(event) {
-		if _, ok := e.forwardedKeys[event.Code]; ok {
-			return e.forwardKeyEvent(event)
+
+	switch active.spec.Mode {
+	case types.ModeHangul:
+		if isKeyRelease(event) {
+			if _, ok := e.forwardedKeys[event.Code]; ok {
+				return e.forwardKeyEvent(event)
+			}
+			return nil
 		}
-		return nil
+		if newPreedit, ok := active.composer.Backspace(); ok {
+			return e.replacePreedit(newPreedit)
+		}
+		if err := e.commitPreedit(); err != nil {
+			return err
+		}
+		return e.forwardKeyEvent(event)
+	case types.ModeDatabase:
+		if isKeyRelease(event) {
+			if _, ok := e.forwardedKeys[event.Code]; ok {
+				return e.forwardKeyEvent(event)
+			}
+			return nil
+		}
+		if active.session != nil {
+			if newPreedit, ok := active.session.Backspace(); ok {
+				return e.replacePreedit(newPreedit)
+			}
+		}
+		if err := e.commitPreedit(); err != nil {
+			return err
+		}
+		return e.forwardKeyEvent(event)
+	default:
+		return e.forwardKeyEvent(event)
 	}
-	if newPreedit, ok := e.composer.Backspace(); ok {
-		return e.replacePreedit(newPreedit)
-	}
-	if err := e.commitPreedit(); err != nil {
-		return err
-	}
-	return e.forwardKeyEvent(event)
 }
 
 func (e *Engine) handleKeyRelease(event *util.InputEvent) error {
@@ -191,6 +277,11 @@ func (e *Engine) handleKeyRelease(event *util.InputEvent) error {
 }
 
 func (e *Engine) handleKeyPress(event *util.InputEvent) error {
+	active := e.activeProfile()
+	if active == nil {
+		return e.forwardKeyEvent(event)
+	}
+
 	if e.modifiersActive(alwaysForward) {
 		if err := e.commitPreedit(); err != nil {
 			return err
@@ -201,7 +292,38 @@ func (e *Engine) handleKeyPress(event *util.InputEvent) error {
 		return e.forwardKeyEvent(event)
 	}
 
-	symbol := e.layout.Translate(event.Code, e.shiftActive())
+	var symbol *layout.LayoutSymbol
+	if active.spec.Layout != nil {
+		symbol = active.spec.Layout.Translate(event.Code, e.shiftActive())
+	}
+
+	switch active.spec.Mode {
+	case types.ModeHangul:
+		return e.handleHangulPress(active, symbol, event)
+	case types.ModeDatabase:
+		return e.handleDatabasePress(active, symbol, event)
+	case types.ModeKana:
+		return e.handleTextualPress(symbol, event)
+	case types.ModeLatin:
+		if symbol == nil {
+			if err := e.commitPreedit(); err != nil {
+				return err
+			}
+			if err := e.ensureShiftForwarded(); err != nil {
+				return err
+			}
+			return e.forwardKeyEvent(event)
+		}
+		return e.handleTextualPress(symbol, event)
+	default:
+		return e.forwardKeyEvent(event)
+	}
+}
+
+func (e *Engine) handleHangulPress(state *profileState, symbol *layout.LayoutSymbol, event *util.InputEvent) error {
+	if state == nil {
+		return e.forwardKeyEvent(event)
+	}
 	if symbol == nil {
 		if err := e.commitPreedit(); err != nil {
 			return err
@@ -231,7 +353,10 @@ func (e *Engine) handleKeyPress(event *util.InputEvent) error {
 		}
 		return e.sendText(symbol.Text)
 	case layout.SymbolJamo:
-		result := e.composer.Feed(symbol.Jamo, symbol.Role)
+		if state.composer == nil {
+			return e.forwardKeyEvent(event)
+		}
+		result := state.composer.Feed(symbol.Jamo, symbol.Role)
 		if result.Commit != "" {
 			if err := e.commitText(result.Commit); err != nil {
 				return err
@@ -243,6 +368,107 @@ func (e *Engine) handleKeyPress(event *util.InputEvent) error {
 			}
 		}
 		return nil
+	default:
+		return nil
+	}
+}
+
+func (e *Engine) handleDatabasePress(state *profileState, symbol *layout.LayoutSymbol, event *util.InputEvent) error {
+	if symbol == nil {
+		if err := e.commitPreedit(); err != nil {
+			return err
+		}
+		if err := e.ensureShiftForwarded(); err != nil {
+			return err
+		}
+		return e.forwardKeyEvent(event)
+	}
+
+	switch symbol.Kind {
+	case layout.SymbolPassthrough:
+		if symbol.CommitBefore {
+			if err := e.commitPreedit(); err != nil {
+				return err
+			}
+		}
+		if err := e.ensureShiftForwarded(); err != nil {
+			return err
+		}
+		return e.forwardKeyEvent(event)
+	case layout.SymbolText:
+		if state.session == nil {
+			if symbol.CommitBefore {
+				if err := e.commitPreedit(); err != nil {
+					return err
+				}
+			}
+			return e.sendText(symbol.Text)
+		}
+		pre := state.session.Append(symbol.Text)
+		if pre != e.preedit {
+			if err := e.replacePreedit(pre); err != nil {
+				return err
+			}
+		}
+		return nil
+	case layout.SymbolJamo:
+		text := string(symbol.Jamo)
+		if state.session == nil {
+			if symbol.CommitBefore {
+				if err := e.commitPreedit(); err != nil {
+					return err
+				}
+			}
+			return e.sendText(text)
+		}
+		pre := state.session.Append(text)
+		if pre != e.preedit {
+			if err := e.replacePreedit(pre); err != nil {
+				return err
+			}
+		}
+		return nil
+	default:
+		return nil
+	}
+}
+
+func (e *Engine) handleTextualPress(symbol *layout.LayoutSymbol, event *util.InputEvent) error {
+	if symbol == nil {
+		if err := e.commitPreedit(); err != nil {
+			return err
+		}
+		if err := e.ensureShiftForwarded(); err != nil {
+			return err
+		}
+		return e.forwardKeyEvent(event)
+	}
+
+	switch symbol.Kind {
+	case layout.SymbolPassthrough:
+		if symbol.CommitBefore {
+			if err := e.commitPreedit(); err != nil {
+				return err
+			}
+		}
+		if err := e.ensureShiftForwarded(); err != nil {
+			return err
+		}
+		return e.forwardKeyEvent(event)
+	case layout.SymbolText:
+		if symbol.CommitBefore {
+			if err := e.commitPreedit(); err != nil {
+				return err
+			}
+		}
+		return e.sendText(symbol.Text)
+	case layout.SymbolJamo:
+		if symbol.CommitBefore {
+			if err := e.commitPreedit(); err != nil {
+				return err
+			}
+		}
+		return e.sendText(string(symbol.Jamo))
 	default:
 		return nil
 	}
@@ -349,13 +575,33 @@ func (e *Engine) restoreForwardedModifiers(codes []uint16) {
 }
 
 func (e *Engine) toggleMode() error {
+	if len(e.profiles) <= 1 {
+		return nil
+	}
 	if err := e.commitPreedit(); err != nil {
 		return err
 	}
-	if e.mode == types.ModeHangul {
-		e.mode = types.ModeLatin
-	} else {
-		e.mode = types.ModeHangul
+	if current := e.activeProfile(); current != nil {
+		if current.session != nil {
+			current.session.Reset()
+		}
+		if current.composer != nil {
+			current.composer.Flush()
+		}
+	}
+	e.currentProfile = (e.currentProfile + 1) % len(e.profiles)
+	next := e.activeProfile()
+	if next != nil {
+		e.mode = next.spec.Mode
+		if next.session != nil {
+			next.session.Reset()
+		}
+		if next.composer != nil {
+			next.composer.Flush()
+		}
+	}
+	if err := e.replacePreedit(""); err != nil {
+		return err
 	}
 	return nil
 }
@@ -371,7 +617,20 @@ func (e *Engine) commitText(text string) error {
 }
 
 func (e *Engine) commitPreedit() error {
-	commit := e.composer.Flush()
+	active := e.activeProfile()
+	var commit string
+	if active != nil {
+		switch active.spec.Mode {
+		case types.ModeHangul:
+			if active.composer != nil {
+				commit = active.composer.Flush()
+			}
+		case types.ModeDatabase:
+			if active.session != nil {
+				commit = active.session.Commit()
+			}
+		}
+	}
 	if commit == "" && e.preedit == "" {
 		return nil
 	}

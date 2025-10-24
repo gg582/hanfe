@@ -8,15 +8,27 @@ import (
 
 	"hanfe/internal/cli"
 	"hanfe/internal/config"
+	"hanfe/internal/dbinput"
 	"hanfe/internal/device"
 	"hanfe/internal/emitter"
 	"hanfe/internal/engine"
+	"hanfe/internal/hangul"
 	"hanfe/internal/layout"
+	"hanfe/internal/ttybridge"
+	"hanfe/internal/types"
 )
 
 const daemonEnv = "HANFE_DAEMONIZED"
 
 func main() {
+	if ttybridge.InHelperMode() {
+		if err := ttybridge.RunHelper(); err != nil {
+			fmt.Fprintf(os.Stderr, "hanfe tty helper: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	opts, err := cli.Parse(os.Args)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "hanfe: %v\n", err)
@@ -35,6 +47,20 @@ func main() {
 		return
 	}
 
+	if opts.TTYPath == "" {
+		detected, err := ttybridge.DetectTTYPath()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "hanfe: %v\n", err)
+			os.Exit(1)
+		}
+		opts.TTYPath = detected
+	}
+
+	if err := ttybridge.SpawnHelper(opts.TTYPath); err != nil {
+		fmt.Fprintf(os.Stderr, "hanfe: %v\n", err)
+		os.Exit(1)
+	}
+
 	spawned, err := daemonizeIfNeeded(opts.Daemonize)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "hanfe: failed to daemonize: %v\n", err)
@@ -44,20 +70,87 @@ func main() {
 		return
 	}
 
+	ttyClient, err := ttybridge.Attach()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "hanfe: %v\n", err)
+		os.Exit(1)
+	}
+	if opts.TTYPath != "" && ttyClient == nil {
+		fmt.Fprintf(os.Stderr, "hanfe: failed to connect to tty helper\n")
+		os.Exit(1)
+	}
+
 	toggleCfg, err := config.ResolveToggleConfig(opts.ToggleConfigPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "hanfe: %v\n", err)
 		os.Exit(1)
 	}
 
-	layoutName := opts.LayoutName
-	if layoutName == "" {
-		layoutName = "dubeolsik"
-	}
-	keyLayout, err := layout.Load(layoutName)
+	profilesCfg, err := config.ResolveProfilesConfig(opts.ProfileConfigPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "hanfe: %v\n", err)
 		os.Exit(1)
+	}
+
+	engineProfiles := make([]engine.ProfileSpec, 0, len(profilesCfg.Profiles))
+	for _, prof := range profilesCfg.Profiles {
+		layoutName := prof.Layout
+		if opts.LayoutName != "" && prof.Mode == types.ModeHangul {
+			layoutName = opts.LayoutName
+		}
+
+		var keyLayout *layout.Layout
+		effectiveName := layoutName
+		if effectiveName == "" {
+			effectiveName = prof.Name
+		}
+		if layoutName != "" {
+			keyLayout, err = layout.Load(layoutName)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "hanfe: %v\n", err)
+				os.Exit(1)
+			}
+		}
+
+		if len(prof.Overrides) > 0 {
+			if keyLayout == nil {
+				keyLayout = layout.NewLayout(effectiveName)
+			}
+			for _, override := range prof.Overrides {
+				var symbol *layout.LayoutSymbol
+				switch override.Kind {
+				case config.PairText:
+					symbol = layout.NewTextSymbol(override.Value)
+				case config.PairJamo:
+					runes := []rune(override.Value)
+					if len(runes) == 0 {
+						fmt.Fprintf(os.Stderr, "hanfe: empty jamo override for %s\n", prof.Name)
+						os.Exit(1)
+					}
+					symbol = layout.NewJamoSymbol(runes[0], hangul.RoleAuto)
+				default:
+					fmt.Fprintf(os.Stderr, "hanfe: unsupported pair override for %s\n", prof.Name)
+					os.Exit(1)
+				}
+				keyLayout.ApplyOverride(override.Key, override.Shift, symbol)
+			}
+		}
+
+		var dict *dbinput.Dictionary
+		if prof.DatabasePath != "" {
+			dict, err = dbinput.LoadDictionary(prof.DatabasePath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "hanfe: %v\n", err)
+				os.Exit(1)
+			}
+		}
+
+		engineProfiles = append(engineProfiles, engine.ProfileSpec{
+			Name:       prof.Name,
+			Mode:       prof.Mode,
+			Layout:     keyLayout,
+			Dictionary: dict,
+		})
 	}
 
 	devicePath := opts.DevicePath
@@ -82,13 +175,22 @@ func main() {
 	}
 	defer syscall.Close(fd)
 
-	fallback, err := emitter.Open(layout.UnicodeHexKeycodes(), opts.TTYPath)
+	directCommit := opts.SuppressHex
+	if !directCommit && os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
+		directCommit = true
+	}
+	if directCommit && ttyClient == nil && opts.PTYPath == "" {
+		fmt.Fprintf(os.Stderr, "hanfe: cannot disable unicode hex without tty or pty mirror; falling back to hex\n")
+		directCommit = false
+	}
+
+	fallback, err := emitter.Open(layout.UnicodeHexKeycodes(), ttyClient, opts.PTYPath, directCommit)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "hanfe: %v\n", err)
 		os.Exit(1)
 	}
 
-	eng := engine.NewEngine(fd, keyLayout, toggleCfg, fallback)
+	eng := engine.NewEngine(fd, engineProfiles, toggleCfg, fallback)
 	if err := eng.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "hanfe: %v\n", err)
 		os.Exit(1)

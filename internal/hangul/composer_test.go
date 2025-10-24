@@ -132,7 +132,51 @@ func TestHangulComposerDoubleMedial(t *testing.T) {
 	if result.Commit != "" {
 		t.Fatalf("expected no commit while composing double medial, got %q", result.Commit)
 	}
-	if result.Preedit != "와" {
-		t.Fatalf("expected composed vowel to yield '와', got %q", result.Preedit)
+	if result.Preedit != "ㅘ" {
+		t.Fatalf("expected composed vowel to yield 'ㅘ', got %q", result.Preedit)
+	}
+}
+
+func TestHangulComposerNoAutoIeung(t *testing.T) {
+	composer := NewHangulComposer()
+
+	result := composer.Feed('ㅏ', RoleAuto)
+	if result.Commit != "" {
+		t.Fatalf("expected no commit for initial vowel, got %q", result.Commit)
+	}
+	if result.Preedit != "ㅏ" {
+		t.Fatalf("expected preedit to remain as vowel jamo, got %q", result.Preedit)
+	}
+
+	result = composer.Feed('ㅏ', RoleAuto)
+	if result.Commit != "ㅏ" {
+		t.Fatalf("expected previous vowel to commit when new vowel typed, got %q", result.Commit)
+	}
+	if result.Preedit != "ㅏ" {
+		t.Fatalf("expected new vowel preedit to be 'ㅏ', got %q", result.Preedit)
+	}
+}
+
+func TestHangulComposerCarryTrailingToLeading(t *testing.T) {
+	composer := NewHangulComposer()
+
+	composer.Feed('ㅂ', RoleAuto)
+	composer.Feed('ㅗ', RoleAuto)
+
+	result := composer.Feed('ㅈ', RoleAuto)
+	if result.Preedit != "봊" {
+		t.Fatalf("expected trailing consonant to produce '봊', got %q", result.Preedit)
+	}
+
+	result = composer.Feed('ㅏ', RoleAuto)
+	if result.Commit != "보" {
+		t.Fatalf("expected previous syllable to commit as '보', got %q", result.Commit)
+	}
+	if result.Preedit != "자" {
+		t.Fatalf("expected new syllable to start with '자', got %q", result.Preedit)
+	}
+
+	if composer.Flush() != "자" {
+		t.Fatalf("expected flush to commit trailing syllable '자'")
 	}
 }

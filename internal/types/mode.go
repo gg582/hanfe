@@ -5,6 +5,8 @@ type InputMode int
 const (
 	ModeHangul InputMode = iota
 	ModeLatin
+	ModeKana
+	ModeDatabase
 )
 
 func (m InputMode) String() string {
@@ -13,6 +15,10 @@ func (m InputMode) String() string {
 		return "hangul"
 	case ModeLatin:
 		return "latin"
+	case ModeKana:
+		return "kana"
+	case ModeDatabase:
+		return "database"
 	default:
 		return "unknown"
 	}
