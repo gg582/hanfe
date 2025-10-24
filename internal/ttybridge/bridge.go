@@ -19,6 +19,21 @@ const (
 
 var retainedParent *os.File
 
+// BridgeFDForFork exposes the retained parent-side file descriptor for the
+// helper bridge so callers can preserve it across fork/exec boundaries. The
+// returned boolean indicates whether a descriptor should be forwarded and the
+// environment variable name that must be updated with the inherited descriptor
+// number.
+func BridgeFDForFork() (*os.File, string, bool) {
+	if retainedParent == nil {
+		return nil, "", false
+	}
+	if os.Getenv(bridgeFDEnv) == "" {
+		return nil, "", false
+	}
+	return retainedParent, bridgeFDEnv, true
+}
+
 // InHelperMode reports whether the current process should act as the TTY helper
 // daemon instead of running the main engine.
 func InHelperMode() bool {

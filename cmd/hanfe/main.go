@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -260,9 +261,18 @@ func daemonizeIfNeeded(enabled bool) (bool, error) {
 		return false, err
 	}
 
+	files := []*os.File{os.Stdin, os.Stdout, os.Stderr}
+	env := append([]string{}, os.Environ()...)
+
+	if bridgeFile, envKey, ok := ttybridge.BridgeFDForFork(); ok {
+		files = append(files, bridgeFile)
+		env = setEnv(env, envKey, strconv.Itoa(len(files)-1))
+	}
+	env = setEnv(env, daemonEnv, "1")
+
 	attrs := &os.ProcAttr{
-		Files: []*os.File{os.Stdin, os.Stdout, os.Stderr},
-		Env:   append(os.Environ(), daemonEnv+"=1"),
+		Files: files,
+		Env:   env,
 		Sys:   &syscall.SysProcAttr{Setsid: true},
 	}
 
@@ -274,4 +284,15 @@ func daemonizeIfNeeded(enabled bool) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+func setEnv(env []string, key, value string) []string {
+	prefix := key + "="
+	for i, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			env[i] = prefix + value
+			return env
+		}
+	}
+	return append(env, prefix+value)
 }
