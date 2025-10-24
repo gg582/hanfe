@@ -260,14 +260,8 @@ func daemonizeIfNeeded(enabled bool) (bool, error) {
 		return false, err
 	}
 
-	devNull, err := os.OpenFile("/dev/null", os.O_RDWR, 0)
-	if err != nil {
-		return false, err
-	}
-	defer devNull.Close()
-
 	attrs := &os.ProcAttr{
-		Files: []*os.File{devNull, devNull, devNull},
+		Files: []*os.File{os.Stdin, os.Stdout, os.Stderr},
 		Env:   append(os.Environ(), daemonEnv+"=1"),
 		Sys:   &syscall.SysProcAttr{Setsid: true},
 	}
