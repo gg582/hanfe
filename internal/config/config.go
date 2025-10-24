@@ -284,3 +284,14 @@ func ResolveToggleConfig(cliPath string) (ToggleConfig, error) {
 	}
 	return DefaultToggleConfig(), nil
 }
+
+func ParseKeyName(name string) (uint16, error) {
+	codes, err := parseKeyToken(name)
+	if err != nil {
+		return 0, err
+	}
+	if len(codes) != 1 {
+		return 0, ConfigError{msg: fmt.Sprintf("key '%s' resolves to multiple codes", name)}
+	}
+	return codes[0], nil
+}
