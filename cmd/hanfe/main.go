@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"syscall"
 
+	"hanfe/internal/backend"
 	"hanfe/internal/cli"
 	"hanfe/internal/config"
 	"hanfe/internal/device"
@@ -13,6 +15,7 @@ import (
 	"hanfe/internal/engine"
 	"hanfe/internal/layout"
 	"hanfe/internal/ttybridge"
+	"hanfe/internal/types"
 )
 
 const daemonEnv = "HANFE_DAEMONIZED"
@@ -83,14 +86,117 @@ func main() {
 		os.Exit(1)
 	}
 
-	layoutName := opts.LayoutName
-	if layoutName == "" {
-		layoutName = "dubeolsik"
+	normalizeMode := func(name string) string {
+		normalized := strings.ToLower(strings.TrimSpace(name))
+		switch normalized {
+		case "", "hangul":
+			return "dubeolsik"
+		case "default", "latin", "english":
+			return "latin"
+		default:
+			return normalized
+		}
 	}
-	keyLayout, err := layout.Load(layoutName)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "hanfe: %v\n", err)
+
+	modeOrder := toggleCfg.ModeCycle
+	if len(opts.ModeOrder) > 0 {
+		modeOrder = make([]string, 0, len(opts.ModeOrder))
+		for _, name := range opts.ModeOrder {
+			modeOrder = append(modeOrder, normalizeMode(name))
+		}
+	}
+	if len(modeOrder) == 0 {
+		modeOrder = []string{"dubeolsik", "latin"}
+	}
+
+	layoutOverride := normalizeMode(opts.LayoutName)
+	if opts.LayoutName != "" {
+		replaced := false
+		for i, name := range modeOrder {
+			if name == "dubeolsik" || strings.EqualFold(name, toggleCfg.DefaultMode) {
+				modeOrder[i] = layoutOverride
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			modeOrder = append([]string{layoutOverride}, modeOrder...)
+		}
+		toggleCfg.DefaultMode = layoutOverride
+	}
+
+	if toggleCfg.DefaultMode == "" && len(modeOrder) > 0 {
+		toggleCfg.DefaultMode = modeOrder[0]
+	}
+
+	var customPairs []layout.CustomPair
+	if opts.KeypairPath != "" {
+		pairs, perr := layout.LoadCustomPairs(opts.KeypairPath)
+		if perr != nil {
+			fmt.Fprintf(os.Stderr, "hanfe: %v\n", perr)
+			os.Exit(1)
+		}
+		customPairs = pairs
+	}
+
+	var pinyinDB backend.Database
+	if opts.PinyinDBPath != "" {
+		db, derr := backend.LoadDatabase(opts.PinyinDBPath)
+		if derr != nil {
+			fmt.Fprintf(os.Stderr, "hanfe: %v\n", derr)
+			os.Exit(1)
+		}
+		pinyinDB = db
+	}
+
+	modeSpecs := make([]engine.ModeSpec, 0, len(modeOrder))
+	for _, name := range modeOrder {
+		normalized := normalizeMode(name)
+		switch normalized {
+		case "latin":
+			modeSpecs = append(modeSpecs, engine.ModeSpec{Name: "latin", Kind: types.ModeLatin})
+		case "pinyin":
+			if !pinyinDB.Available() {
+				fmt.Fprintf(os.Stderr, "hanfe: pinyin mode requires --pinyin-db database file\n")
+				os.Exit(1)
+			}
+			modeSpecs = append(modeSpecs, engine.ModeSpec{Name: "pinyin", Kind: types.ModeDatabase, Database: pinyinDB})
+		default:
+			keyLayout, lerr := layout.Load(normalized)
+			if lerr != nil {
+				fmt.Fprintf(os.Stderr, "hanfe: %v\n", lerr)
+				os.Exit(1)
+			}
+			if len(customPairs) > 0 {
+				keyLayout, lerr = layout.ApplyCustomPairs(keyLayout, customPairs)
+				if lerr != nil {
+					fmt.Fprintf(os.Stderr, "hanfe: %v\n", lerr)
+					os.Exit(1)
+				}
+			}
+			layoutCopy := keyLayout
+			kind := types.ModeHangul
+			if keyLayout.Category() == layout.CategoryKana {
+				kind = types.ModeKana
+			}
+			modeSpecs = append(modeSpecs, engine.ModeSpec{Name: normalized, Kind: kind, Layout: &layoutCopy})
+		}
+	}
+
+	if len(modeSpecs) == 0 {
+		fmt.Fprintf(os.Stderr, "hanfe: no input modes configured\n")
 		os.Exit(1)
+	}
+
+	defaultFound := false
+	for _, spec := range modeSpecs {
+		if strings.EqualFold(spec.Name, toggleCfg.DefaultMode) {
+			defaultFound = true
+			break
+		}
+	}
+	if !defaultFound {
+		toggleCfg.DefaultMode = modeSpecs[0].Name
 	}
 
 	devicePath := opts.DevicePath
@@ -130,7 +236,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	eng := engine.NewEngine(fd, keyLayout, toggleCfg, fallback)
+	eng, err := engine.NewEngine(fd, modeSpecs, toggleCfg, fallback)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "hanfe: %v\n", err)
+		os.Exit(1)
+	}
 	if err := eng.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "hanfe: %v\n", err)
 		os.Exit(1)
@@ -150,14 +260,8 @@ func daemonizeIfNeeded(enabled bool) (bool, error) {
 		return false, err
 	}
 
-	devNull, err := os.OpenFile("/dev/null", os.O_RDWR, 0)
-	if err != nil {
-		return false, err
-	}
-	defer devNull.Close()
-
 	attrs := &os.ProcAttr{
-		Files: []*os.File{devNull, devNull, devNull},
+		Files: []*os.File{os.Stdin, os.Stdout, os.Stderr},
 		Env:   append(os.Environ(), daemonEnv+"=1"),
 		Sys:   &syscall.SysProcAttr{Setsid: true},
 	}

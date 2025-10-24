@@ -2,8 +2,10 @@ package engine
 
 import (
 	"fmt"
+	"strings"
 	"syscall"
 
+	"hanfe/internal/backend"
 	"hanfe/internal/config"
 	"hanfe/internal/emitter"
 	"hanfe/internal/hangul"
@@ -13,17 +15,25 @@ import (
 	"hanfe/internal/util"
 )
 
+type ModeSpec struct {
+	Name     string
+	Kind     types.InputMode
+	Layout   *layout.Layout
+	Database backend.Database
+}
+
 type Engine struct {
 	deviceFD           int
-	layout             layout.Layout
+	modes              []ModeSpec
+	modeIndex          int
 	toggleChords       []config.ToggleChord
 	emitter            emitter.Output
-	composer           *hangul.HangulComposer
-	mode               types.InputMode
+	hangulComposers    map[int]*hangul.HangulComposer
 	modifierState      map[uint16]bool
 	forwardedModifiers map[uint16]bool
 	forwardedKeys      map[uint16]struct{}
 	preedit            string
+	pinyinBuffer       string
 }
 
 var (
@@ -45,14 +55,17 @@ var (
 	alwaysForward = combine(combine(ctrlKeys, altKeys), metaKeys)
 )
 
-func NewEngine(deviceFD int, layout layout.Layout, toggle config.ToggleConfig, emitter emitter.Output) *Engine {
+func NewEngine(deviceFD int, modes []ModeSpec, toggle config.ToggleConfig, emitter emitter.Output) (*Engine, error) {
+	if len(modes) == 0 {
+		return nil, fmt.Errorf("no input modes configured")
+	}
+
 	eng := &Engine{
 		deviceFD:           deviceFD,
-		layout:             layout,
+		modes:              modes,
 		toggleChords:       toggle.Chords,
 		emitter:            emitter,
-		composer:           hangul.NewHangulComposer(),
-		mode:               toggle.DefaultMode,
+		hangulComposers:    make(map[int]*hangul.HangulComposer),
 		modifierState:      make(map[uint16]bool),
 		forwardedModifiers: make(map[uint16]bool),
 		forwardedKeys:      make(map[uint16]struct{}),
@@ -71,7 +84,23 @@ func NewEngine(deviceFD int, layout layout.Layout, toggle config.ToggleConfig, e
 			}
 		}
 	}
-	return eng
+	defaultIndex := 0
+	if toggle.DefaultMode != "" {
+		for idx, mode := range modes {
+			if strings.EqualFold(mode.Name, toggle.DefaultMode) {
+				defaultIndex = idx
+				break
+			}
+		}
+	}
+	eng.modeIndex = defaultIndex
+
+	for idx, mode := range modes {
+		if mode.Kind == types.ModeHangul {
+			eng.hangulComposers[idx] = hangul.NewHangulComposer()
+		}
+	}
+	return eng, nil
 }
 
 func (e *Engine) Run() error {
@@ -106,7 +135,7 @@ func (e *Engine) Run() error {
 
 func (e *Engine) processEvent(event *util.InputEvent) error {
 	if event.Type != linux.EvKey {
-		if e.mode == types.ModeLatin {
+		if e.currentModeKind() == types.ModeLatin {
 			return e.forwardKeyEvent(event)
 		}
 		return nil
@@ -124,7 +153,7 @@ func (e *Engine) processEvent(event *util.InputEvent) error {
 		return e.handleModifier(event)
 	}
 
-	if e.mode == types.ModeLatin {
+	if e.currentModeKind() == types.ModeLatin {
 		return e.forwardKeyEvent(event)
 	}
 
@@ -150,7 +179,7 @@ func (e *Engine) handleModifier(event *util.InputEvent) error {
 		e.modifierState[code] = false
 	}
 
-	if e.mode == types.ModeLatin || contains(alwaysForward, code) {
+	if e.currentModeKind() == types.ModeLatin || contains(alwaysForward, code) {
 		if err := e.forwardKeyEvent(event); err != nil {
 			return err
 		}
@@ -165,8 +194,11 @@ func (e *Engine) handleModifier(event *util.InputEvent) error {
 }
 
 func (e *Engine) handleBackspace(event *util.InputEvent) error {
-	if e.mode == types.ModeLatin {
+	switch e.currentModeKind() {
+	case types.ModeLatin, types.ModeKana:
 		return e.forwardKeyEvent(event)
+	case types.ModeDatabase:
+		return e.handleDatabaseBackspace(event)
 	}
 	if isKeyRelease(event) {
 		if _, ok := e.forwardedKeys[event.Code]; ok {
@@ -174,8 +206,10 @@ func (e *Engine) handleBackspace(event *util.InputEvent) error {
 		}
 		return nil
 	}
-	if newPreedit, ok := e.composer.Backspace(); ok {
-		return e.replacePreedit(newPreedit)
+	if composer := e.currentComposerIfHangul(); composer != nil {
+		if newPreedit, ok := composer.Backspace(); ok {
+			return e.replacePreedit(newPreedit)
+		}
 	}
 	if err := e.commitPreedit(); err != nil {
 		return err
@@ -191,6 +225,11 @@ func (e *Engine) handleKeyRelease(event *util.InputEvent) error {
 }
 
 func (e *Engine) handleKeyPress(event *util.InputEvent) error {
+	mode := e.currentMode()
+	if mode.Kind == types.ModeDatabase {
+		return e.handleDatabaseKeyPress(event)
+	}
+
 	if e.modifiersActive(alwaysForward) {
 		if err := e.commitPreedit(); err != nil {
 			return err
@@ -201,7 +240,14 @@ func (e *Engine) handleKeyPress(event *util.InputEvent) error {
 		return e.forwardKeyEvent(event)
 	}
 
-	symbol := e.layout.Translate(event.Code, e.shiftActive())
+	if mode.Layout == nil {
+		if err := e.commitPreedit(); err != nil {
+			return err
+		}
+		return e.forwardKeyEvent(event)
+	}
+
+	symbol := mode.Layout.Translate(event.Code, e.shiftActive())
 	if symbol == nil {
 		if err := e.commitPreedit(); err != nil {
 			return err
@@ -231,7 +277,8 @@ func (e *Engine) handleKeyPress(event *util.InputEvent) error {
 		}
 		return e.sendText(symbol.Text)
 	case layout.SymbolJamo:
-		result := e.composer.Feed(symbol.Jamo, symbol.Role)
+		composer := e.currentComposer()
+		result := composer.Feed(symbol.Jamo, symbol.Role)
 		if result.Commit != "" {
 			if err := e.commitText(result.Commit); err != nil {
 				return err
@@ -305,6 +352,30 @@ func (e *Engine) shouldToggle(event *util.InputEvent) bool {
 	return false
 }
 
+func (e *Engine) currentMode() ModeSpec {
+	return e.modes[e.modeIndex]
+}
+
+func (e *Engine) currentModeKind() types.InputMode {
+	return e.modes[e.modeIndex].Kind
+}
+
+func (e *Engine) currentComposer() *hangul.HangulComposer {
+	composer, ok := e.hangulComposers[e.modeIndex]
+	if !ok || composer == nil {
+		composer = hangul.NewHangulComposer()
+		e.hangulComposers[e.modeIndex] = composer
+	}
+	return composer
+}
+
+func (e *Engine) currentComposerIfHangul() *hangul.HangulComposer {
+	if e.currentModeKind() != types.ModeHangul {
+		return nil
+	}
+	return e.currentComposer()
+}
+
 func (e *Engine) ensureShiftForwarded() error {
 	for _, code := range shiftKeys {
 		if e.modifierState[code] && !e.forwardedModifiers[code] {
@@ -352,12 +423,12 @@ func (e *Engine) toggleMode() error {
 	if err := e.commitPreedit(); err != nil {
 		return err
 	}
-	if e.mode == types.ModeHangul {
-		e.mode = types.ModeLatin
-	} else {
-		e.mode = types.ModeHangul
+	if len(e.modes) == 0 {
+		return nil
 	}
-	return nil
+	e.modeIndex = (e.modeIndex + 1) % len(e.modes)
+	e.pinyinBuffer = ""
+	return e.replacePreedit("")
 }
 
 func (e *Engine) commitText(text string) error {
@@ -371,18 +442,115 @@ func (e *Engine) commitText(text string) error {
 }
 
 func (e *Engine) commitPreedit() error {
-	commit := e.composer.Flush()
-	if commit == "" && e.preedit == "" {
+	mode := e.currentMode()
+	switch mode.Kind {
+	case types.ModeHangul:
+		composer := e.currentComposer()
+		commit := composer.Flush()
+		if commit == "" && e.preedit == "" {
+			return nil
+		}
+		if err := e.replacePreedit(""); err != nil {
+			return err
+		}
+		if commit != "" {
+			if err := e.sendText(commit); err != nil {
+				return err
+			}
+		}
 		return nil
+	case types.ModeDatabase:
+		return e.commitPinyinBuffer()
+	default:
+		if e.preedit == "" {
+			return nil
+		}
+		return e.replacePreedit("")
+	}
+}
+
+func (e *Engine) handleDatabaseKeyPress(event *util.InputEvent) error {
+	if e.modifiersActive(alwaysForward) {
+		if err := e.commitPreedit(); err != nil {
+			return err
+		}
+		if err := e.ensureShiftForwarded(); err != nil {
+			return err
+		}
+		return e.forwardKeyEvent(event)
+	}
+
+	code := event.Code
+	if code >= uint16(linux.KeyA) && code <= uint16(linux.KeyZ) {
+		ch := rune('a' + int(code-uint16(linux.KeyA)))
+		e.pinyinBuffer += string(ch)
+		return e.replacePreedit(e.pinyinBuffer)
+	}
+
+	if code >= uint16(linux.Key1) && code <= uint16(linux.Key5) {
+		ch := rune('1' + int(code-uint16(linux.Key1)))
+		e.pinyinBuffer += string(ch)
+		return e.replacePreedit(e.pinyinBuffer)
+	}
+
+	if code == uint16(linux.KeyApostrophe) {
+		e.pinyinBuffer += "'"
+		return e.replacePreedit(e.pinyinBuffer)
+	}
+
+	switch code {
+	case uint16(linux.KeySpace), uint16(linux.KeyEnter), uint16(linux.KeyTab):
+		if err := e.commitPinyinBuffer(); err != nil {
+			return err
+		}
+		return e.forwardKeyEvent(event)
+	default:
+		if err := e.commitPinyinBuffer(); err != nil {
+			return err
+		}
+		if err := e.ensureShiftForwarded(); err != nil {
+			return err
+		}
+		return e.forwardKeyEvent(event)
+	}
+}
+
+func (e *Engine) handleDatabaseBackspace(event *util.InputEvent) error {
+	if isKeyRelease(event) {
+		return nil
+	}
+	if e.pinyinBuffer == "" {
+		return e.forwardKeyEvent(event)
+	}
+	runes := []rune(e.pinyinBuffer)
+	if len(runes) == 0 {
+		return e.replacePreedit("")
+	}
+	e.pinyinBuffer = string(runes[:len(runes)-1])
+	return e.replacePreedit(e.pinyinBuffer)
+}
+
+func (e *Engine) commitPinyinBuffer() error {
+	if e.pinyinBuffer == "" {
+		if e.preedit != "" {
+			return e.replacePreedit("")
+		}
+		return nil
+	}
+	mode := e.currentMode()
+	text := e.pinyinBuffer
+	if mode.Database.Available() {
+		if candidate, ok := mode.Database.Lookup(text); ok {
+			text = candidate
+		}
 	}
 	if err := e.replacePreedit(""); err != nil {
 		return err
 	}
-	if commit != "" {
-		if err := e.sendText(commit); err != nil {
-			return err
-		}
+	if err := e.sendText(text); err != nil {
+		return err
 	}
+	e.pinyinBuffer = ""
 	return nil
 }
 
