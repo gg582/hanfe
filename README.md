@@ -44,7 +44,8 @@ Useful command-line options:
 - `--toggle-config PATH` – Path to a toggle configuration file (defaults to
   `./toggle.ini` when present).
 - `--tty PATH` – Mirror committed text into a TTY using `TIOCSTI` via a helper
-  daemon (defaults to the controlling TTY when omitted).
+  daemon (the controlling TTY is detected automatically when omitted and the
+  daemon exits if no terminal is available).
 - `--pty PATH` – Mirror committed text into a PTY without exposing the Unicode hex sequence.
 - `--daemon` / `--no-daemon` – Control background execution (daemon mode is the
   default).

@@ -45,9 +45,12 @@ func main() {
 	}
 
 	if opts.TTYPath == "" {
-		if detected, err := ttybridge.DetectTTYPath(); err == nil && detected != "" {
-			opts.TTYPath = detected
+		detected, err := ttybridge.DetectTTYPath()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "hanfe: %v\n", err)
+			os.Exit(1)
 		}
+		opts.TTYPath = detected
 	}
 
 	if err := ttybridge.SpawnHelper(opts.TTYPath); err != nil {
