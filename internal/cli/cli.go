@@ -12,7 +12,9 @@ type Options struct {
 	LayoutName       string
 	ToggleConfigPath string
 	TTYPath          string
+	PTYPath          string
 	Daemonize        bool
+	SuppressHex      bool
 }
 
 func Parse(args []string) (Options, error) {
@@ -56,6 +58,15 @@ func Parse(args []string) (Options, error) {
 			}
 			opts.TTYPath = value
 			i = next
+		case strings.HasPrefix(arg, "--pty"):
+			value, next, err := extractValue(arg, i, args)
+			if err != nil {
+				return Options{}, err
+			}
+			opts.PTYPath = value
+			i = next
+		case arg == "--no-hex" || arg == "--direct-tty":
+			opts.SuppressHex = true
 		default:
 			return Options{}, fmt.Errorf("unknown option: %s", arg)
 		}
@@ -81,7 +92,9 @@ Options:
   --device PATH           Path to the evdev keyboard device (auto-detected if omitted)
   --layout NAME           Keyboard layout (default: dubeolsik)
   --toggle-config PATH    Path to toggle.ini (default: ./toggle.ini if present)
-  --tty PATH              Optional TTY to mirror text output to
+  --tty PATH              TTY to mirror text output to (defaults to controlling TTY)
+  --pty PATH              Optional PTY to mirror committed text without raw hex
+  --no-hex                Skip Unicode hex injection and rely on direct TTY/PTY mirroring
   --daemon                Run in the background (default)
   --no-daemon             Stay in the foreground
   --list-layouts          List available layouts
