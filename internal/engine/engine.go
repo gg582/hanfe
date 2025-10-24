@@ -17,7 +17,7 @@ type Engine struct {
 	deviceFD           int
 	layout             layout.Layout
 	toggleChords       []config.ToggleChord
-	emitter            *emitter.FallbackEmitter
+	emitter            emitter.Output
 	composer           *hangul.HangulComposer
 	mode               types.InputMode
 	modifierState      map[uint16]bool
@@ -45,7 +45,7 @@ var (
 	alwaysForward = combine(combine(ctrlKeys, altKeys), metaKeys)
 )
 
-func NewEngine(deviceFD int, layout layout.Layout, toggle config.ToggleConfig, emitter *emitter.FallbackEmitter) *Engine {
+func NewEngine(deviceFD int, layout layout.Layout, toggle config.ToggleConfig, emitter emitter.Output) *Engine {
 	eng := &Engine{
 		deviceFD:           deviceFD,
 		layout:             layout,
