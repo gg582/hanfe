@@ -19,6 +19,11 @@ without proper input-context support still receive composed characters.
   `--no-daemon` flag for foreground debugging. `--tty` mirroring locks to the
   active terminal automatically, with an optional `--pty` override for custom
   sessions.
+- **Dedicated TTY composer** – A new `hanfe-tty` binary offers a raw terminal
+  translator using fcitx/libhangul-style automata so shells receive composed
+  Hangul without relying on `TIOCSTI` mirroring.
+- **Autostart wrapper** – `hanfe-autostart` launches both daemons so the IME and
+  the TTY helper start together with a single command.
 
 ## Building
 
@@ -37,7 +42,7 @@ Root (or proper udev rules/capabilities) is typically required to access
 sudo ./hanfe --no-daemon
 ```
 
-Useful command-line options:
+Useful command-line options for `hanfe`:
 
 - `--device PATH` – Explicit evdev keyboard path (auto-detected when omitted).
 - `--layout NAME` – Keyboard layout (`dubeolsik` or `sebeolsik-390`).
@@ -51,6 +56,32 @@ Useful command-line options:
   default).
 - `--list-layouts` – Print available layouts and exit.
 - `-h`, `--help` – Show usage information.
+
+### `hanfe-tty`
+
+`hanfe-tty` focuses on direct terminal composition. It keeps STDIN in raw mode,
+translates Latin key strokes into Hangul syllables with the same state machine
+fcitx/libhangul uses, and writes the composed text straight to STDOUT. This is
+handy for remote shells or applications that cannot receive fallback `uinput`
+events.
+
+```bash
+./hanfe-tty
+```
+
+Press `Ctrl+C` to terminate; the composer flushes any pending syllable before
+exiting.
+
+### `hanfe-autostart`
+
+To launch both the IME daemon and the TTY helper together, run:
+
+```bash
+hanfe-autostart
+```
+
+The wrapper looks up `hanfe` and `hanfe-tty` on `PATH`, starts them, and shuts
+down the remaining process if either one exits or a termination signal arrives.
 
 ## Configuration
 
