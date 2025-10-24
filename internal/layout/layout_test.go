@@ -10,7 +10,7 @@ import (
 func TestAvailableLayouts(t *testing.T) {
 	names := AvailableLayouts()
 
-	expected := []string{"dubeolsik", "sebeolsik-390"}
+	expected := []string{"dubeolsik", "kana86", "sebeolsik-390"}
 	if len(names) != len(expected) {
 		t.Fatalf("expected %d layouts, got %d", len(expected), len(names))
 	}
@@ -59,6 +59,23 @@ func TestLoadSebeolsikTrailingRole(t *testing.T) {
 	}
 	if symbol.Kind != SymbolJamo || symbol.Role != hangul.RoleTrailing || symbol.Jamo != 'ㅅ' {
 		t.Fatalf("expected trailing role symbol for shifted KeyY, got %#v", symbol)
+	}
+}
+
+func TestLoadKana86(t *testing.T) {
+	layout, err := Load("kana86")
+	if err != nil {
+		t.Fatalf("unexpected error loading kana86: %v", err)
+	}
+
+	symbol := layout.Translate(uint16(linux.KeyQ), false)
+	if symbol == nil || symbol.Kind != SymbolText || symbol.Text != "た" {
+		t.Fatalf("expected hiragana for KeyQ, got %#v", symbol)
+	}
+
+	shifted := layout.Translate(uint16(linux.KeyQ), true)
+	if shifted == nil || shifted.Kind != SymbolText || shifted.Text != "タ" {
+		t.Fatalf("expected katakana for shifted KeyQ, got %#v", shifted)
 	}
 }
 
