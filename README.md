@@ -52,6 +52,9 @@ Useful command-line options for `hanfe`:
   daemon (the controlling TTY is detected automatically when omitted and the
   daemon exits if no terminal is available).
 - `--pty PATH` – Mirror committed text into a PTY without exposing the Unicode hex sequence.
+- `--no-hex` – Skip Unicode hex injection and rely on the TTY/PTY helper for
+  direct Hangul output. This mode is enabled automatically when no `DISPLAY`
+  or `WAYLAND_DISPLAY` is present.
 - `--daemon` / `--no-daemon` – Control background execution (daemon mode is the
   default).
 - `--list-layouts` – Print available layouts and exit.

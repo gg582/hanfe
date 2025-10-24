@@ -13,12 +13,13 @@ import (
 )
 
 type FallbackEmitter struct {
-	uinputFD    int
-	ttyClient   *ttybridge.Client
-	ptyFD       int
-	closed      bool
-	hexKeycodes [16]int
-	inputBuffer strings.Builder
+	uinputFD     int
+	ttyClient    *ttybridge.Client
+	ptyFD        int
+	closed       bool
+	hexKeycodes  [16]int
+	inputBuffer  strings.Builder
+	directCommit bool
 }
 
 const (
@@ -42,8 +43,8 @@ type uinputUserDev struct {
 	Absflat      [absCnt]int32
 }
 
-func Open(hexMap map[rune]uint16, ttyClient *ttybridge.Client, ptyPath string) (*FallbackEmitter, error) {
-	emitter := &FallbackEmitter{uinputFD: -1, ttyClient: ttyClient, ptyFD: -1}
+func Open(hexMap map[rune]uint16, ttyClient *ttybridge.Client, ptyPath string, directCommit bool) (*FallbackEmitter, error) {
+	emitter := &FallbackEmitter{uinputFD: -1, ttyClient: ttyClient, ptyFD: -1, directCommit: directCommit}
 	for i := range emitter.hexKeycodes {
 		emitter.hexKeycodes[i] = -1
 	}
@@ -172,8 +173,10 @@ func (e *FallbackEmitter) SendBackspace(count int) error {
 		return err
 	}
 	for i := 0; i < count; i++ {
-		if err := e.TapKey(uint16(linux.KeyBackspace)); err != nil {
-			return err
+		if !e.directCommit {
+			if err := e.TapKey(uint16(linux.KeyBackspace)); err != nil {
+				return err
+			}
 		}
 		if err := e.mirrorBackspace(); err != nil {
 			return err
@@ -187,6 +190,13 @@ func (e *FallbackEmitter) SendText(text string) error {
 		return nil
 	}
 	e.inputBuffer.WriteString(text)
+	if e.directCommit {
+		if !utf8.ValidString(text) {
+			e.inputBuffer.Reset()
+			return fmt.Errorf("invalid utf-8 sequence")
+		}
+		return e.flushBuffer()
+	}
 	remaining := text
 	for len(remaining) > 0 {
 		r, size := utf8.DecodeRuneInString(remaining)

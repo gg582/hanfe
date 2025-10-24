@@ -115,7 +115,16 @@ func main() {
 	}
 	defer syscall.Close(fd)
 
-	fallback, err := emitter.Open(layout.UnicodeHexKeycodes(), ttyClient, opts.PTYPath)
+	directCommit := opts.SuppressHex
+	if !directCommit && os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
+		directCommit = true
+	}
+	if directCommit && ttyClient == nil && opts.PTYPath == "" {
+		fmt.Fprintf(os.Stderr, "hanfe: cannot disable unicode hex without tty or pty mirror; falling back to hex\n")
+		directCommit = false
+	}
+
+	fallback, err := emitter.Open(layout.UnicodeHexKeycodes(), ttyClient, opts.PTYPath, directCommit)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "hanfe: %v\n", err)
 		os.Exit(1)

@@ -14,6 +14,7 @@ type Options struct {
 	TTYPath          string
 	PTYPath          string
 	Daemonize        bool
+	SuppressHex      bool
 }
 
 func Parse(args []string) (Options, error) {
@@ -64,6 +65,8 @@ func Parse(args []string) (Options, error) {
 			}
 			opts.PTYPath = value
 			i = next
+		case arg == "--no-hex" || arg == "--direct-tty":
+			opts.SuppressHex = true
 		default:
 			return Options{}, fmt.Errorf("unknown option: %s", arg)
 		}
@@ -91,6 +94,7 @@ Options:
   --toggle-config PATH    Path to toggle.ini (default: ./toggle.ini if present)
   --tty PATH              TTY to mirror text output to (defaults to controlling TTY)
   --pty PATH              Optional PTY to mirror committed text without raw hex
+  --no-hex                Skip Unicode hex injection and rely on direct TTY/PTY mirroring
   --daemon                Run in the background (default)
   --no-daemon             Stay in the foreground
   --list-layouts          List available layouts
