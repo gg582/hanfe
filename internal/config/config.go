@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"hanfe/internal/linux"
-	"hanfe/internal/types"
 )
 
 type ToggleChord struct {
@@ -18,7 +17,8 @@ type ToggleChord struct {
 
 type ToggleConfig struct {
 	Chords      []ToggleChord
-	DefaultMode types.InputMode
+	DefaultMode string
+	ModeCycle   []string
 }
 
 type ConfigError struct {
@@ -33,7 +33,8 @@ func DefaultToggleConfig() ToggleConfig {
 			{Key: uint16(linux.KeyRightAlt)},
 			{Key: uint16(linux.KeyHangeul)},
 		},
-		DefaultMode: types.ModeHangul,
+		DefaultMode: "dubeolsik",
+		ModeCycle:   []string{"dubeolsik", "latin"},
 	}
 }
 
@@ -49,6 +50,7 @@ func LoadToggleConfig(path string) (ToggleConfig, error) {
 	var keyLine string
 	var keysLine string
 	var modeLine string
+	var cycleLine string
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -76,6 +78,8 @@ func LoadToggleConfig(path string) (ToggleConfig, error) {
 			keysLine = value
 		case "default_mode":
 			modeLine = value
+		case "mode_cycle":
+			cycleLine = value
 		}
 	}
 
@@ -101,17 +105,24 @@ func LoadToggleConfig(path string) (ToggleConfig, error) {
 		chords = append(chords, chord)
 	}
 
-	cfg := ToggleConfig{Chords: chords, DefaultMode: types.ModeHangul}
+	cfg := ToggleConfig{Chords: chords, DefaultMode: "dubeolsik"}
 	if modeLine != "" {
-		switch strings.ToLower(strings.TrimSpace(modeLine)) {
-		case "hangul":
-			cfg.DefaultMode = types.ModeHangul
-		case "latin":
-			cfg.DefaultMode = types.ModeLatin
-		default:
-			return ToggleConfig{}, ConfigError{msg: fmt.Sprintf("invalid default_mode '%s' in %s", modeLine, path)}
+		cfg.DefaultMode = normalizeModeName(modeLine)
+	}
+
+	cycle := parseModeCycle(cycleLine)
+	if len(cycle) == 0 {
+		if cfg.DefaultMode == "latin" {
+			cycle = []string{"latin", "dubeolsik"}
+		} else {
+			cycle = []string{cfg.DefaultMode, "latin"}
 		}
 	}
+
+	if !containsMode(cycle, cfg.DefaultMode) {
+		cycle = append([]string{cfg.DefaultMode}, cycle...)
+	}
+	cfg.ModeCycle = uniqueModes(cycle)
 
 	return cfg, nil
 }
@@ -283,4 +294,51 @@ func ResolveToggleConfig(cliPath string) (ToggleConfig, error) {
 		return DefaultToggleConfig(), nil
 	}
 	return DefaultToggleConfig(), nil
+}
+
+func normalizeModeName(value string) string {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	switch normalized {
+	case "", "hangul":
+		return "dubeolsik"
+	case "latin", "english", "default":
+		return "latin"
+	default:
+		return normalized
+	}
+}
+
+func parseModeCycle(line string) []string {
+	tokens := splitComma(line)
+	out := make([]string, 0, len(tokens))
+	for _, token := range tokens {
+		normalized := normalizeModeName(token)
+		if normalized == "" {
+			continue
+		}
+		out = append(out, normalized)
+	}
+	return out
+}
+
+func containsMode(modes []string, target string) bool {
+	for _, mode := range modes {
+		if mode == target {
+			return true
+		}
+	}
+	return false
+}
+
+func uniqueModes(modes []string) []string {
+	seen := make(map[string]struct{}, len(modes))
+	out := make([]string, 0, len(modes))
+	for _, mode := range modes {
+		if _, ok := seen[mode]; ok {
+			continue
+		}
+		seen[mode] = struct{}{}
+		out = append(out, mode)
+	}
+	return out
 }

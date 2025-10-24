@@ -6,16 +6,21 @@ import (
 	"testing"
 
 	"hanfe/internal/linux"
-	"hanfe/internal/types"
 )
 
 func TestDefaultToggleConfig(t *testing.T) {
 	cfg := DefaultToggleConfig()
-	if cfg.DefaultMode != types.ModeHangul {
-		t.Fatalf("expected default mode hangul, got %v", cfg.DefaultMode)
+	if cfg.DefaultMode != "dubeolsik" {
+		t.Fatalf("expected default mode dubeolsik, got %v", cfg.DefaultMode)
 	}
 	if len(cfg.Chords) != 2 {
 		t.Fatalf("expected two default toggle chords, got %d", len(cfg.Chords))
+	}
+	if len(cfg.ModeCycle) != 2 {
+		t.Fatalf("expected two modes in default cycle, got %d", len(cfg.ModeCycle))
+	}
+	if cfg.ModeCycle[0] != "dubeolsik" || cfg.ModeCycle[1] != "latin" {
+		t.Fatalf("unexpected default cycle %v", cfg.ModeCycle)
 	}
 
 	if cfg.Chords[0].Key != uint16(linux.KeyRightAlt) {
@@ -43,8 +48,12 @@ func TestLoadToggleConfig(t *testing.T) {
 		t.Fatalf("LoadToggleConfig returned error: %v", err)
 	}
 
-	if cfg.DefaultMode != types.ModeLatin {
+	if cfg.DefaultMode != "latin" {
 		t.Fatalf("expected default mode latin, got %v", cfg.DefaultMode)
+	}
+
+	if len(cfg.ModeCycle) == 0 {
+		t.Fatalf("expected non-empty mode cycle")
 	}
 
 	if len(cfg.Chords) != 4 {

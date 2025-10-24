@@ -6,6 +6,7 @@ import (
 	"hanfe/internal/config"
 	"hanfe/internal/layout"
 	"hanfe/internal/linux"
+	"hanfe/internal/types"
 	"hanfe/internal/util"
 )
 
@@ -51,7 +52,18 @@ func newTestEngine(t *testing.T) (*Engine, *fakeEmitter) {
 		t.Fatalf("load layout: %v", err)
 	}
 	emitter := &fakeEmitter{}
-	eng := NewEngine(0, keyLayout, config.DefaultToggleConfig(), emitter)
+	layoutCopy := keyLayout
+	toggle := config.DefaultToggleConfig()
+	toggle.ModeCycle = []string{"dubeolsik", "latin"}
+	toggle.DefaultMode = "dubeolsik"
+	modes := []ModeSpec{
+		{Name: "dubeolsik", Kind: types.ModeHangul, Layout: &layoutCopy},
+		{Name: "latin", Kind: types.ModeLatin},
+	}
+	eng, err := NewEngine(0, modes, toggle, emitter)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
 	return eng, emitter
 }
 

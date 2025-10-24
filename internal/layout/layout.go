@@ -29,12 +29,22 @@ type LayoutEntry struct {
 	Shifted *LayoutSymbol
 }
 
+type Category string
+
+const (
+	CategoryHangul Category = "hangul"
+	CategoryKana   Category = "kana"
+)
+
 type Layout struct {
-	name    string
-	mapping map[uint16]LayoutEntry
+	name     string
+	category Category
+	mapping  map[uint16]LayoutEntry
 }
 
 func (l Layout) Name() string { return l.name }
+
+func (l Layout) Category() Category { return l.category }
 
 func (l Layout) Translate(code uint16, shift bool) *LayoutSymbol {
 	entry, ok := l.mapping[code]
@@ -122,7 +132,7 @@ func buildDubeolsik() Layout {
 		addEntry(mapping, key, makePassthroughSymbol(true), nil)
 	}
 
-	return Layout{name: "dubeolsik", mapping: mapping}
+	return Layout{name: "dubeolsik", category: CategoryHangul, mapping: mapping}
 }
 
 func buildSebeolsik390() Layout {
@@ -184,11 +194,108 @@ func buildSebeolsik390() Layout {
 		addEntry(mapping, key, makePassthroughSymbol(true), nil)
 	}
 
-	return Layout{name: "sebeolsik-390", mapping: mapping}
+	return Layout{name: "sebeolsik-390", category: CategoryHangul, mapping: mapping}
+}
+
+func makeTextSymbol(value string, commitBefore bool) *LayoutSymbol {
+	return &LayoutSymbol{Kind: SymbolText, Text: value, CommitBefore: commitBefore}
+}
+
+func hiraganaToKatakana(r rune) rune {
+	// Hiragana and Katakana blocks are offset by a constant value.
+	const hiraganaStart = rune(0x3041)
+	const hiraganaEnd = rune(0x3096)
+	const katakanaStart = rune(0x30A1)
+	offset := katakanaStart - hiraganaStart
+	if r >= hiraganaStart && r <= hiraganaEnd {
+		return r + offset
+	}
+	return r
+}
+
+func hiraganaPair(normal string) (string, string) {
+	if normal == "" {
+		return "", ""
+	}
+	runes := []rune(normal)
+	shifted := make([]rune, len(runes))
+	for i, r := range runes {
+		shifted[i] = hiraganaToKatakana(r)
+	}
+	return normal, string(shifted)
+}
+
+func buildKana86() Layout {
+	mapping := make(map[uint16]LayoutEntry)
+
+	addKana := func(key int, normal string) {
+		n, s := hiraganaPair(normal)
+		addEntry(mapping, key, makeTextSymbol(n, false), makeTextSymbol(s, false))
+	}
+
+	addKana(linux.Key1, "ぬ")
+	addKana(linux.Key2, "ふ")
+	addKana(linux.Key3, "あ")
+	addKana(linux.Key4, "う")
+	addKana(linux.Key5, "え")
+	addKana(linux.Key6, "お")
+	addKana(linux.Key7, "や")
+	addKana(linux.Key8, "ゆ")
+	addKana(linux.Key9, "よ")
+	addKana(linux.Key0, "わ")
+	addKana(linux.KeyMinus, "ほ")
+	addKana(linux.KeyEqual, "へ")
+
+	addKana(linux.KeyQ, "た")
+	addKana(linux.KeyW, "て")
+	addKana(linux.KeyE, "い")
+	addKana(linux.KeyR, "す")
+	addKana(linux.KeyT, "か")
+	addKana(linux.KeyY, "ん")
+	addKana(linux.KeyU, "な")
+	addKana(linux.KeyI, "に")
+	addKana(linux.KeyO, "ら")
+	addKana(linux.KeyP, "せ")
+	addKana(linux.KeyLeftBrace, "゛")
+	addKana(linux.KeyRightBrace, "゜")
+
+	addKana(linux.KeyA, "ち")
+	addKana(linux.KeyS, "と")
+	addKana(linux.KeyD, "し")
+	addKana(linux.KeyF, "は")
+	addKana(linux.KeyG, "き")
+	addKana(linux.KeyH, "く")
+	addKana(linux.KeyJ, "ま")
+	addKana(linux.KeyK, "の")
+	addKana(linux.KeyL, "り")
+	addKana(linux.KeySemicolon, "れ")
+	addKana(linux.KeyApostrophe, "け")
+	addKana(linux.KeyBackslash, "む")
+
+	addKana(linux.KeyZ, "つ")
+	addKana(linux.KeyX, "さ")
+	addKana(linux.KeyC, "そ")
+	addKana(linux.KeyV, "ひ")
+	addKana(linux.KeyB, "こ")
+	addKana(linux.KeyN, "み")
+	addKana(linux.KeyM, "も")
+	addKana(linux.KeyComma, "ね")
+	addKana(linux.KeyDot, "る")
+	addKana(linux.KeySlash, "め")
+
+	space := makePassthroughSymbol(true)
+	addEntry(mapping, linux.KeySpace, space, nil)
+
+	passthroughKeys := []int{linux.KeyTab, linux.KeyEnter, linux.KeyEsc, linux.KeyBackspace}
+	for _, key := range passthroughKeys {
+		addEntry(mapping, key, space, nil)
+	}
+
+	return Layout{name: "kana86", category: CategoryKana, mapping: mapping}
 }
 
 func AvailableLayouts() []string {
-	names := []string{"dubeolsik", "sebeolsik-390"}
+	names := []string{"dubeolsik", "kana86", "sebeolsik-390"}
 	sort.Strings(names)
 	return names
 }
@@ -199,6 +306,8 @@ func Load(name string) (Layout, error) {
 		return buildDubeolsik(), nil
 	case "sebeolsik-390":
 		return buildSebeolsik390(), nil
+	case "kana86":
+		return buildKana86(), nil
 	default:
 		return Layout{}, fmt.Errorf("unknown layout: %s", name)
 	}
