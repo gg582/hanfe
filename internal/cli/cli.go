@@ -11,6 +11,7 @@ type Options struct {
 	DevicePath       string
 	LayoutName       string
 	ToggleConfigPath string
+	SocketPath       string
 	TTYPath          string
 	PTYPath          string
 	Daemonize        bool
@@ -33,6 +34,13 @@ func Parse(args []string) (Options, error) {
 			opts.Daemonize = true
 		case arg == "--no-daemon" || arg == "--foreground":
 			opts.Daemonize = false
+		case strings.HasPrefix(arg, "--socket"):
+			value, next, err := extractValue(arg, i, args)
+			if err != nil {
+				return Options{}, err
+			}
+			opts.SocketPath = value
+			i = next
 		case strings.HasPrefix(arg, "--device"):
 			value, next, err := extractValue(arg, i, args)
 			if err != nil {
@@ -130,6 +138,7 @@ Usage: hanfe [--device /dev/input/eventX] [options]
 Options:
   --device PATH           Path to the evdev keyboard device (auto-detected if omitted)
   --layout NAME           Keyboard layout (default: dubeolsik)
+  --socket PATH           Path to the translation unix socket (default: $XDG_RUNTIME_DIR/hanfe.sock)
   --mode-order LIST       Comma-separated input mode cycle (overrides toggle.ini)
   --toggle-config PATH    Path to toggle.ini (default: ./toggle.ini if present)
   --keypairs PATH         JSON file describing custom keypairs to merge into the layout

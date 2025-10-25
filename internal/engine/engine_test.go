@@ -87,8 +87,8 @@ func TestEngineSeparatesBojaFromBwaj(t *testing.T) {
 	pressKey(t, eng, uint16(linux.KeyW))
 	pressKey(t, eng, uint16(linux.KeyK))
 
-	if got := out.String(); got != "보자" {
-		t.Fatalf("expected buffer to contain '보자', got %q", got)
+	if got := out.String(); got != "보" {
+		t.Fatalf("expected buffer to contain committed '보', got %q", got)
 	}
 	if eng.preedit != "자" {
 		t.Fatalf("expected preedit '자', got %q", eng.preedit)
@@ -103,8 +103,8 @@ func TestEngineRetainsDoubleMedialForBwaj(t *testing.T) {
 	pressKey(t, eng, uint16(linux.KeyK))
 	pressKey(t, eng, uint16(linux.KeyW))
 
-	if got := out.String(); got != "봦" {
-		t.Fatalf("expected buffer to contain '봦', got %q", got)
+	if got := out.String(); got != "" {
+		t.Fatalf("expected buffer to remain empty before commit, got %q", got)
 	}
 	if eng.preedit != "봦" {
 		t.Fatalf("expected preedit '봦', got %q", eng.preedit)
