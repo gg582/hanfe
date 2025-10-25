@@ -121,20 +121,28 @@ func run(args []string) error {
 		}
 	}
 
-	if err := ttybridge.SpawnHelper(ttyPath); err != nil {
-		return err
-	}
-	ttyClient, err := ttybridge.Attach()
-	if err != nil {
-		return err
-	}
-
-	directCommit := opts.SuppressHex || !hasDisplay()
+	directCommit := opts.SuppressHex || !hasDisplay() || opts.TTYPath != "" || opts.PTYPath != ""
 	if directCommit && ttyPath == "" && opts.PTYPath == "" {
 		directCommit = false
 	}
 
-	fallback, err := emitter.Open(layout.UnicodeHexKeycodes(), ttyClient, opts.PTYPath, directCommit)
+	var ttyClient *ttybridge.Client
+	if directCommit && ttyPath != "" {
+		if err := ttybridge.SpawnHelper(ttyPath); err != nil {
+			return err
+		}
+		ttyClient, err = ttybridge.Attach()
+		if err != nil {
+			return err
+		}
+	}
+
+	ptyPath := ""
+	if directCommit {
+		ptyPath = opts.PTYPath
+	}
+
+	fallback, err := emitter.Open(layout.UnicodeHexKeycodes(), ttyClient, ptyPath, directCommit)
 	if err != nil {
 		return err
 	}

@@ -44,7 +44,7 @@ type uinputUserDev struct {
 }
 
 func Open(hexMap map[rune]uint16, ttyClient *ttybridge.Client, ptyPath string, directCommit bool) (*FallbackEmitter, error) {
-	emitter := &FallbackEmitter{uinputFD: -1, ttyClient: ttyClient, ptyFD: -1, directCommit: directCommit}
+	emitter := &FallbackEmitter{uinputFD: -1, ttyClient: nil, ptyFD: -1, directCommit: directCommit}
 	for i := range emitter.hexKeycodes {
 		emitter.hexKeycodes[i] = -1
 	}
@@ -55,18 +55,25 @@ func Open(hexMap map[rune]uint16, ttyClient *ttybridge.Client, ptyPath string, d
 		}
 	}
 
-	fd, err := syscall.Open("/dev/uinput", syscall.O_WRONLY|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0)
-	if err != nil {
-		return nil, fmt.Errorf("open /dev/uinput: %w", err)
-	}
-	emitter.uinputFD = fd
+	if directCommit {
+		emitter.ttyClient = ttyClient
+	} else {
+		if ttyClient != nil {
+			_ = ttyClient.Close()
+		}
+		fd, err := syscall.Open("/dev/uinput", syscall.O_WRONLY|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0)
+		if err != nil {
+			return nil, fmt.Errorf("open /dev/uinput: %w", err)
+		}
+		emitter.uinputFD = fd
 
-	if err := configureUinput(fd); err != nil {
-		syscall.Close(fd)
-		return nil, err
+		if err := configureUinput(fd); err != nil {
+			syscall.Close(fd)
+			return nil, err
+		}
 	}
 
-	if ptyPath != "" {
+	if directCommit && ptyPath != "" {
 		ptyFD, err := syscall.Open(ptyPath, syscall.O_WRONLY|syscall.O_CLOEXEC, 0)
 		if err != nil {
 			emitter.Close()
