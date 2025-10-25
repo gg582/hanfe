@@ -555,6 +555,10 @@ func (e *Engine) commitPinyinBuffer() error {
 }
 
 func (e *Engine) replacePreedit(newText string) error {
+	if e.currentModeKind() == types.ModeHangul {
+		e.preedit = newText
+		return nil
+	}
 	if newText == e.preedit {
 		return nil
 	}
