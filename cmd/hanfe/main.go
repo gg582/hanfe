@@ -1,257 +1,109 @@
 package main
 
 import (
+	"bufio"
 	"errors"
+	"flag"
 	"fmt"
+	"net"
 	"os"
-	"strconv"
+	"os/signal"
 	"strings"
 	"syscall"
 
-	"hanfe/internal/backend"
-	"hanfe/internal/cli"
-	"hanfe/internal/config"
-	"hanfe/internal/device"
-	"hanfe/internal/emitter"
-	"hanfe/internal/engine"
-	"hanfe/internal/layout"
-	"hanfe/internal/ttybridge"
-	"hanfe/internal/types"
+	"github.com/snowmerak/hangul-logotype/hangul"
+
+	"hanfe/internal/common"
 )
 
 const daemonEnv = "HANFE_DAEMONIZED"
 
 func main() {
-	if ttybridge.InHelperMode() {
-		if err := ttybridge.RunHelper(); err != nil {
-			fmt.Fprintf(os.Stderr, "hanfe tty helper: %v\n", err)
-			os.Exit(1)
-		}
-		return
-	}
-
-	opts, err := cli.Parse(os.Args)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "hanfe: %v\n", err)
-		os.Exit(1)
-	}
-
-	if opts.ShowHelp {
-		fmt.Println(cli.Usage())
-		return
-	}
-
-	if opts.ListLayouts {
-		for _, name := range layout.AvailableLayouts() {
-			fmt.Println(name)
-		}
-		return
-	}
-
-	if opts.TTYPath == "" {
-		detected, err := ttybridge.DetectTTYPath()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "hanfe: %v\n", err)
-			os.Exit(1)
-		}
-		opts.TTYPath = detected
-	}
-
-	if err := ttybridge.SpawnHelper(opts.TTYPath); err != nil {
-		fmt.Fprintf(os.Stderr, "hanfe: %v\n", err)
-		os.Exit(1)
-	}
-
-	spawned, err := daemonizeIfNeeded(opts.Daemonize)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "hanfe: failed to daemonize: %v\n", err)
-		os.Exit(1)
-	}
-	if spawned {
-		return
-	}
-
-	ttyClient, err := ttybridge.Attach()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "hanfe: %v\n", err)
-		os.Exit(1)
-	}
-	if opts.TTYPath != "" && ttyClient == nil {
-		fmt.Fprintf(os.Stderr, "hanfe: failed to connect to tty helper\n")
-		os.Exit(1)
-	}
-
-	toggleCfg, err := config.ResolveToggleConfig(opts.ToggleConfigPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "hanfe: %v\n", err)
-		os.Exit(1)
-	}
-
-	normalizeMode := func(name string) string {
-		normalized := strings.ToLower(strings.TrimSpace(name))
-		switch normalized {
-		case "", "hangul":
-			return "dubeolsik"
-		case "default", "latin", "english":
-			return "latin"
-		default:
-			return normalized
-		}
-	}
-
-	modeOrder := toggleCfg.ModeCycle
-	if len(opts.ModeOrder) > 0 {
-		modeOrder = make([]string, 0, len(opts.ModeOrder))
-		for _, name := range opts.ModeOrder {
-			modeOrder = append(modeOrder, normalizeMode(name))
-		}
-	}
-	if len(modeOrder) == 0 {
-		modeOrder = []string{"dubeolsik", "latin"}
-	}
-
-	layoutOverride := normalizeMode(opts.LayoutName)
-	if opts.LayoutName != "" {
-		replaced := false
-		for i, name := range modeOrder {
-			if name == "dubeolsik" || strings.EqualFold(name, toggleCfg.DefaultMode) {
-				modeOrder[i] = layoutOverride
-				replaced = true
-				break
-			}
-		}
-		if !replaced {
-			modeOrder = append([]string{layoutOverride}, modeOrder...)
-		}
-		toggleCfg.DefaultMode = layoutOverride
-	}
-
-	if toggleCfg.DefaultMode == "" && len(modeOrder) > 0 {
-		toggleCfg.DefaultMode = modeOrder[0]
-	}
-
-	var customPairs []layout.CustomPair
-	if opts.KeypairPath != "" {
-		pairs, perr := layout.LoadCustomPairs(opts.KeypairPath)
-		if perr != nil {
-			fmt.Fprintf(os.Stderr, "hanfe: %v\n", perr)
-			os.Exit(1)
-		}
-		customPairs = pairs
-	}
-
-	var pinyinDB backend.Database
-	if opts.PinyinDBPath != "" {
-		db, derr := backend.LoadDatabase(opts.PinyinDBPath)
-		if derr != nil {
-			fmt.Fprintf(os.Stderr, "hanfe: %v\n", derr)
-			os.Exit(1)
-		}
-		pinyinDB = db
-	}
-
-	modeSpecs := make([]engine.ModeSpec, 0, len(modeOrder))
-	for _, name := range modeOrder {
-		normalized := normalizeMode(name)
-		switch normalized {
-		case "latin":
-			modeSpecs = append(modeSpecs, engine.ModeSpec{Name: "latin", Kind: types.ModeLatin})
-		case "pinyin":
-			if !pinyinDB.Available() {
-				fmt.Fprintf(os.Stderr, "hanfe: pinyin mode requires --pinyin-db database file\n")
-				os.Exit(1)
-			}
-			modeSpecs = append(modeSpecs, engine.ModeSpec{Name: "pinyin", Kind: types.ModeDatabase, Database: pinyinDB})
-		default:
-			keyLayout, lerr := layout.Load(normalized)
-			if lerr != nil {
-				fmt.Fprintf(os.Stderr, "hanfe: %v\n", lerr)
-				os.Exit(1)
-			}
-			if len(customPairs) > 0 {
-				keyLayout, lerr = layout.ApplyCustomPairs(keyLayout, customPairs)
-				if lerr != nil {
-					fmt.Fprintf(os.Stderr, "hanfe: %v\n", lerr)
-					os.Exit(1)
-				}
-			}
-			layoutCopy := keyLayout
-			kind := types.ModeHangul
-			if keyLayout.Category() == layout.CategoryKana {
-				kind = types.ModeKana
-			}
-			modeSpecs = append(modeSpecs, engine.ModeSpec{Name: normalized, Kind: kind, Layout: &layoutCopy})
-		}
-	}
-
-	if len(modeSpecs) == 0 {
-		fmt.Fprintf(os.Stderr, "hanfe: no input modes configured\n")
-		os.Exit(1)
-	}
-
-	defaultFound := false
-	for _, spec := range modeSpecs {
-		if strings.EqualFold(spec.Name, toggleCfg.DefaultMode) {
-			defaultFound = true
-			break
-		}
-	}
-	if !defaultFound {
-		toggleCfg.DefaultMode = modeSpecs[0].Name
-	}
-
-	devicePath := opts.DevicePath
-	if devicePath == "" {
-		detected, derr := device.DetectKeyboardDevice()
-		if derr != nil {
-			var detectionErr device.DetectionError
-			if errors.As(derr, &detectionErr) {
-				fmt.Fprintf(os.Stderr, "hanfe: %s\n", detectionErr.Message)
-			} else {
-				fmt.Fprintf(os.Stderr, "hanfe: failed to detect keyboard: %v\n", derr)
-			}
-			os.Exit(1)
-		}
-		devicePath = detected.Path
-	}
-
-	fd, err := syscall.Open(devicePath, syscall.O_RDONLY|syscall.O_CLOEXEC, 0)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "hanfe: open %s: %v\n", devicePath, err)
-		os.Exit(1)
-	}
-	defer syscall.Close(fd)
-
-	directCommit := opts.SuppressHex
-	if !directCommit && os.Getenv("DISPLAY") == "" && os.Getenv("WAYLAND_DISPLAY") == "" {
-		directCommit = true
-	}
-	if directCommit && ttyClient == nil && opts.PTYPath == "" {
-		fmt.Fprintf(os.Stderr, "hanfe: cannot disable unicode hex without tty or pty mirror; falling back to hex\n")
-		directCommit = false
-	}
-
-	fallback, err := emitter.Open(layout.UnicodeHexKeycodes(), ttyClient, opts.PTYPath, directCommit)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "hanfe: %v\n", err)
-		os.Exit(1)
-	}
-
-	eng, err := engine.NewEngine(fd, modeSpecs, toggleCfg, fallback)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "hanfe: %v\n", err)
-		os.Exit(1)
-	}
-	if err := eng.Run(); err != nil {
+	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "hanfe: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func daemonizeIfNeeded(enabled bool) (bool, error) {
-	if !enabled {
-		return false, nil
+func run() error {
+	defaultSocket := common.DefaultSocketPath()
+
+	layoutName := flag.String("layout", common.DefaultLayoutName, fmt.Sprintf("keyboard layout (%s)", strings.Join(common.AvailableLayouts(), ", ")))
+	daemonize := flag.Bool("daemonize", false, "run as a background daemon that serves translations over a unix socket")
+	socketPath := flag.String("socket", defaultSocket, "unix socket path for daemon mode")
+	flag.Parse()
+
+	layout, canonical, err := common.ResolveLayout(*layoutName)
+	if err != nil {
+		return err
 	}
+
+	if *daemonize {
+		spawned, derr := daemonizeIfNeeded()
+		if derr != nil {
+			return derr
+		}
+		if spawned {
+			return nil
+		}
+		return runDaemon(layout, canonical, *socketPath)
+	}
+
+	if flag.NArg() == 0 {
+		info, err := os.Stdin.Stat()
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeCharDevice != 0 {
+			return errors.New("provide text through arguments or stdin")
+		}
+		return runStdin(layout)
+	}
+
+	return runArgs(layout, flag.Args())
+}
+
+func runArgs(layout hangul.KeyboardLayout, args []string) error {
+	typer := hangul.NewLogoTyper().WithLayout(layout)
+	typer.WriteString(strings.Join(args, " "))
+	if _, err := os.Stdout.Write(typer.Result()); err != nil {
+		return err
+	}
+	if len(args) > 0 {
+		if _, err := os.Stdout.WriteString("\n"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func runStdin(layout hangul.KeyboardLayout) error {
+	typer := hangul.NewLogoTyper().WithLayout(layout)
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, 0, 4096), 1024*1024)
+	first := true
+	for scanner.Scan() {
+		if !first {
+			typer.WriteRune('\n')
+		}
+		first = false
+		typer.WriteString(scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	if _, err := os.Stdout.Write(typer.Result()); err != nil {
+		return err
+	}
+	if !first {
+		if _, err := os.Stdout.WriteString("\n"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func daemonizeIfNeeded() (bool, error) {
 	if os.Getenv(daemonEnv) == "1" {
 		return false, nil
 	}
@@ -261,17 +113,11 @@ func daemonizeIfNeeded(enabled bool) (bool, error) {
 		return false, err
 	}
 
-	files := []*os.File{os.Stdin, os.Stdout, os.Stderr}
 	env := append([]string{}, os.Environ()...)
-
-	if bridgeFile, envKey, ok := ttybridge.BridgeFDForFork(); ok {
-		files = append(files, bridgeFile)
-		env = setEnv(env, envKey, strconv.Itoa(len(files)-1))
-	}
 	env = setEnv(env, daemonEnv, "1")
 
 	attrs := &os.ProcAttr{
-		Files: files,
+		Files: []*os.File{os.Stdin, os.Stdout, os.Stderr},
 		Env:   env,
 		Sys:   &syscall.SysProcAttr{Setsid: true},
 	}
@@ -280,10 +126,100 @@ func daemonizeIfNeeded(enabled bool) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if err := proc.Release(); err != nil {
-		return false, err
+	return true, proc.Release()
+}
+
+func runDaemon(layout hangul.KeyboardLayout, layoutName, socketPath string) error {
+	if err := common.EnsureSocketDir(socketPath); err != nil {
+		return fmt.Errorf("create socket dir: %w", err)
 	}
-	return true, nil
+	if err := os.Remove(socketPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", socketPath, err)
+	}
+	defer func() {
+		listener.Close()
+		_ = os.Remove(socketPath)
+	}()
+	if err := os.Chmod(socketPath, 0o660); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("chmod socket: %w", err)
+	}
+
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
+	defer signal.Stop(sigs)
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- serve(listener, layout)
+	}()
+
+	fmt.Fprintf(os.Stderr, "hanfe daemon running with layout %s on %s\n", layoutName, socketPath)
+
+	select {
+	case <-sigs:
+		listener.Close()
+		return nil
+	case err := <-errCh:
+		return err
+	}
+}
+
+func serve(listener net.Listener, layout hangul.KeyboardLayout) error {
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			if errors.Is(err, net.ErrClosed) {
+				return nil
+			}
+			if ne, ok := err.(net.Error); ok && ne.Temporary() {
+				continue
+			}
+			return err
+		}
+
+		go func(c net.Conn) {
+			defer c.Close()
+			if err := handleConnection(c, layout); err != nil {
+				fmt.Fprintf(os.Stderr, "hanfe daemon: %v\n", err)
+			}
+		}(conn)
+	}
+}
+
+func handleConnection(conn net.Conn, layout hangul.KeyboardLayout) error {
+	scanner := bufio.NewScanner(conn)
+	scanner.Buffer(make([]byte, 0, 4096), 1024*1024)
+	writer := bufio.NewWriter(conn)
+	for scanner.Scan() {
+		text := scanner.Text()
+		response := translate(layout, text)
+		if _, err := writer.WriteString(response); err != nil {
+			return err
+		}
+		if err := writer.WriteByte('\n'); err != nil {
+			return err
+		}
+		if err := writer.Flush(); err != nil {
+			return err
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		if errors.Is(err, net.ErrClosed) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+func translate(layout hangul.KeyboardLayout, text string) string {
+	typer := hangul.NewLogoTyper().WithLayout(layout)
+	typer.WriteString(text)
+	return string(typer.Result())
 }
 
 func setEnv(env []string, key, value string) []string {
