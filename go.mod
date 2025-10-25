@@ -1,15 +1,7 @@
 module hanfe
 
-go 1.24.0
+go 1.25.3
 
-toolchain go1.24.3
+require github.com/snowmerak/hangul-logotype v0.0.0-20251024163122-18d3e5a37c13
 
-require (
-	github.com/mattn/go-runewidth v0.0.19
-	golang.org/x/term v0.36.0
-)
-
-require (
-	github.com/clipperhouse/uax29/v2 v2.2.0 // indirect
-	golang.org/x/sys v0.37.0 // indirect
-)
+replace github.com/snowmerak/hangul-logotype => github.com/gg582/hangul-logotype v0.0.0-20251024163122-18d3e5a37c13

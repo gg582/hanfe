@@ -2,17 +2,15 @@ package main
 
 import (
 	"bufio"
-	"errors"
+	"flag"
 	"fmt"
-	"io"
+	"net"
 	"os"
-	"os/signal"
-	"syscall"
+	"strings"
 
-	"github.com/mattn/go-runewidth"
-	"golang.org/x/term"
+	"github.com/snowmerak/hangul-logotype/hangul"
 
-	"hanfe/hanfe-tty/internal/automata"
+	"hanfe/internal/common"
 )
 
 func main() {
@@ -23,140 +21,75 @@ func main() {
 }
 
 func run() error {
-	composer := automata.NewComposer()
-	reader := bufio.NewReader(os.Stdin)
+	defaultSocket := common.DefaultSocketPath()
+
+	layoutName := flag.String("layout", common.DefaultLayoutName, fmt.Sprintf("keyboard layout (%s)", strings.Join(common.AvailableLayouts(), ", ")))
+	socketPath := flag.String("socket", defaultSocket, "unix socket used to talk with the hanfe daemon")
+	localOnly := flag.Bool("local", false, "skip daemon communication and convert locally")
+	flag.Parse()
+
+	layout, _, err := common.ResolveLayout(*layoutName)
+	if err != nil {
+		return err
+	}
+
+	scanner := bufio.NewScanner(os.Stdin)
+	scanner.Buffer(make([]byte, 0, 4096), 1024*1024)
 	writer := bufio.NewWriter(os.Stdout)
 	defer writer.Flush()
 
-	fd := int(os.Stdin.Fd())
-	var restore func() error
-	if term.IsTerminal(fd) {
-		state, err := term.MakeRaw(fd)
-		if err != nil {
+	warned := false
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		var converted string
+		if !*localOnly {
+			converted, err = translateViaSocket(*socketPath, line)
+			if err != nil {
+				if !warned {
+					fmt.Fprintf(os.Stderr, "hanfe-tty: falling back to local conversion: %v\n", err)
+					warned = true
+				}
+				*localOnly = true
+			}
+		}
+		if *localOnly {
+			converted = translate(layout, line)
+		}
+		if _, err := writer.WriteString(converted); err != nil {
 			return err
 		}
-		restore = func() error { return term.Restore(fd, state) }
-		defer func() {
-			if restore != nil {
-				_ = restore()
-			}
-		}()
-	}
-
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigs)
-
-	preedit := ""
-
-	for {
-		select {
-		case <-sigs:
-			if preedit != "" {
-				erase(writer, preedit)
-				preedit = ""
-			}
-			if commit := composer.Flush(); commit != "" {
-				writer.WriteString(commit)
-			}
-			writer.Flush()
-			return nil
-		default:
-		}
-
-		r, _, err := reader.ReadRune()
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				if preedit != "" {
-					erase(writer, preedit)
-				}
-				if commit := composer.Flush(); commit != "" {
-					writer.WriteString(commit)
-				}
-				writer.Flush()
-				return nil
-			}
+		if err := writer.WriteByte('\n'); err != nil {
 			return err
 		}
-
-		switch r {
-		case 0x03: // Ctrl+C
-			if preedit != "" {
-				erase(writer, preedit)
-				preedit = ""
-			}
-			if commit := composer.Flush(); commit != "" {
-				writer.WriteString(commit)
-			}
-			writer.Flush()
-			return nil
-		case '\r':
-			r = '\n'
-		}
-
-		if r == 0x7f || r == '\b' {
-			if preedit != "" {
-				erase(writer, preedit)
-			}
-			if updated, ok := composer.Backspace(); ok {
-				preedit = updated
-				if preedit != "" {
-					writer.WriteString(preedit)
-				}
-				writer.Flush()
-				continue
-			}
-			writer.WriteString("\b \b")
-			writer.Flush()
-			preedit = ""
-			continue
-		}
-
-		if r == '\n' {
-			if preedit != "" {
-				erase(writer, preedit)
-				preedit = ""
-			}
-			if commit := composer.Flush(); commit != "" {
-				writer.WriteString(commit)
-			}
-			writer.WriteRune('\n')
-			writer.Flush()
-			continue
-		}
-
-		if preedit != "" {
-			erase(writer, preedit)
-			preedit = ""
-		}
-
-		commit, nextPreedit := composer.Type(r)
-		if commit != "" {
-			writer.WriteString(commit)
-		}
-		if nextPreedit != "" {
-			writer.WriteString(nextPreedit)
-			preedit = nextPreedit
-		} else {
-			preedit = ""
-		}
-
-		writer.Flush()
 	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	return nil
 }
 
-func erase(w *bufio.Writer, text string) {
-	width := runewidth.StringWidth(text)
-	if width == 0 {
-		return
+func translateViaSocket(socketPath, text string) (string, error) {
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		return "", err
 	}
-	for i := 0; i < width; i++ {
-		w.WriteRune('\b')
+	defer conn.Close()
+
+	if _, err := fmt.Fprintln(conn, text); err != nil {
+		return "", err
 	}
-	for i := 0; i < width; i++ {
-		w.WriteRune(' ')
+
+	reader := bufio.NewReader(conn)
+	response, err := reader.ReadString('\n')
+	if err != nil {
+		return "", err
 	}
-	for i := 0; i < width; i++ {
-		w.WriteRune('\b')
-	}
+	return strings.TrimSuffix(response, "\n"), nil
+}
+
+func translate(layout hangul.KeyboardLayout, text string) string {
+	typer := hangul.NewLogoTyper().WithLayout(layout)
+	typer.WriteString(text)
+	return string(typer.Result())
 }
