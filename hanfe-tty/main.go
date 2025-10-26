@@ -25,8 +25,13 @@ func run() error {
 
 	layoutName := flag.String("layout", common.DefaultLayoutName, fmt.Sprintf("keyboard layout (%s)", strings.Join(common.AvailableLayouts(), ", ")))
 	socketPath := flag.String("socket", defaultSocket, "unix socket used to talk with the hanfe daemon")
-	localOnly := flag.Bool("local", false, "skip daemon communication and convert locally")
+	localOnly := flag.Bool("local", true, "convert locally without contacting the hanfe daemon")
+	remote := flag.Bool("remote", false, "force use of the hanfe daemon for conversion")
 	flag.Parse()
+
+	if *remote {
+		*localOnly = false
+	}
 
 	layout, _, err := common.ResolveLayout(*layoutName)
 	if err != nil {
