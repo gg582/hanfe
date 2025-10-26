@@ -1,2 +1,4 @@
+github.com/BurntSushi/xgb v0.0.0-20210121224620-deaf085860bc h1:7D+Bh06CRPCJO3gr2F7h1sriovOZ8BMhca2Rg85c2nk=
+github.com/BurntSushi/xgb v0.0.0-20210121224620-deaf085860bc/go.mod h1:IVnqGOEym/WlBOVXweHU+Q+/VP0lqqI8lqeDx9IjBqo=
 github.com/gg582/hangul-logotype v0.0.0-20251024163122-18d3e5a37c13 h1:NQGQI+vHqssJGsY10s29sunyX5a6H1V24jetBBon/D4=
 github.com/gg582/hangul-logotype v0.0.0-20251024163122-18d3e5a37c13/go.mod h1:iCCPXul+/T7QLdzvNt/4yW/bD1zO/yMeYp98wIriR9U=
