@@ -188,6 +188,10 @@ func (c *HangulComposer) handleConsonant(ch rune, role JamoRole) []rune {
 	forceLeading := role == RoleLeading
 
 	if c.leading == nil {
+		if c.vowel != nil {
+			commit = append(commit, *c.vowel)
+			c.vowel = nil
+		}
 		c.leading = runePtr(ch)
 		c.trailing = nil
 		return commit

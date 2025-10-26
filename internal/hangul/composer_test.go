@@ -157,6 +157,27 @@ func TestHangulComposerNoAutoIeung(t *testing.T) {
 	}
 }
 
+func TestHangulComposerCommitInitialVowelBeforeConsonant(t *testing.T) {
+	composer := NewHangulComposer()
+
+	result := composer.Feed('ㅏ', RoleAuto)
+	if result.Commit != "" {
+		t.Fatalf("expected initial vowel to stay in preedit, got commit %q", result.Commit)
+	}
+
+	result = composer.Feed('ㄱ', RoleAuto)
+	if result.Commit != "ㅏ" {
+		t.Fatalf("expected previous vowel to commit before consonant, got %q", result.Commit)
+	}
+	if result.Preedit != "ㄱ" {
+		t.Fatalf("expected new preedit to start with the consonant, got %q", result.Preedit)
+	}
+
+	if composer.Flush() != "ㄱ" {
+		t.Fatalf("expected flush to commit the remaining consonant 'ㄱ'")
+	}
+}
+
 func TestHangulComposerCarryTrailingToLeading(t *testing.T) {
 	composer := NewHangulComposer()
 
