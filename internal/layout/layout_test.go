@@ -3,8 +3,8 @@ package layout
 import (
 	"testing"
 
-	"hanfe/internal/hangul"
-	"hanfe/internal/linux"
+	"github.com/gg582/hanfe/internal/hangul"
+	"github.com/gg582/hanfe/internal/linux"
 )
 
 func TestAvailableLayouts(t *testing.T) {

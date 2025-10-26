@@ -12,16 +12,16 @@ import (
 
 	"github.com/gg582/hangul-logotype/hangul"
 
-	"hanfe/internal/backend"
-	"hanfe/internal/cli"
-	"hanfe/internal/common"
-	"hanfe/internal/config"
-	"hanfe/internal/device"
-	"hanfe/internal/emitter"
-	"hanfe/internal/engine"
-	"hanfe/internal/layout"
-	"hanfe/internal/ttybridge"
-	"hanfe/internal/types"
+	"github.com/gg582/hanfe/internal/backend"
+	"github.com/gg582/hanfe/internal/cli"
+	"github.com/gg582/hanfe/internal/common"
+	"github.com/gg582/hanfe/internal/config"
+	"github.com/gg582/hanfe/internal/device"
+	"github.com/gg582/hanfe/internal/emitter"
+	"github.com/gg582/hanfe/internal/engine"
+	"github.com/gg582/hanfe/internal/layout"
+	"github.com/gg582/hanfe/internal/ttybridge"
+	"github.com/gg582/hanfe/internal/types"
 )
 
 const daemonEnv = "HANFE_DAEMONIZED"
@@ -52,6 +52,19 @@ func run(args []string) error {
 	if opts.ListLayouts {
 		listLayouts()
 		return nil
+	}
+
+	ttyHint := opts.TTYPath
+	if ttyHint == "" {
+		ttyHint = ttybridge.TTYPathHint()
+		if ttyHint == "" {
+			if detected, derr := ttybridge.DetectTTYPath(); derr == nil {
+				ttyHint = detected
+			}
+		}
+	}
+	if ttyHint != "" {
+		ttybridge.RememberTTYPath(ttyHint)
 	}
 
 	if opts.Daemonize {
@@ -114,19 +127,16 @@ func run(args []string) error {
 	}
 	defer closeDevice()
 
-	directCommit := opts.SuppressHex || opts.TTYPath != "" || opts.PTYPath != ""
-
-	ttyPath := ""
-	if directCommit {
-		ttyPath = opts.TTYPath
-		if ttyPath == "" {
-			if detectedTTY, derr := ttybridge.DetectTTYPath(); derr == nil {
-				ttyPath = detectedTTY
-			}
+	ttyPath := ttyHint
+	directCommit := opts.PTYPath != "" || ttyPath != "" || opts.SuppressHex
+	if directCommit && ttyPath == "" && opts.PTYPath == "" {
+		if detectedTTY, derr := ttybridge.DetectTTYPath(); derr == nil {
+			ttyPath = detectedTTY
+			ttybridge.RememberTTYPath(ttyPath)
 		}
-		if ttyPath == "" && opts.PTYPath == "" {
-			directCommit = false
-		}
+	}
+	if directCommit && ttyPath == "" && opts.PTYPath == "" {
+		directCommit = false
 	}
 
 	var ttyClient *ttybridge.Client

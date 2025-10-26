@@ -2,5 +2,5 @@ github.com/BurntSushi/xgb v0.0.0-20210121224620-deaf085860bc h1:7D+Bh06CRPCJO3gr
 github.com/BurntSushi/xgb v0.0.0-20210121224620-deaf085860bc/go.mod h1:IVnqGOEym/WlBOVXweHU+Q+/VP0lqqI8lqeDx9IjBqo=
 github.com/gg582/hangul-logotype v0.0.0-20251026060500-5861dee1526c h1:buzozVsXI0+nd69TL7Xhdq56qcXFdtO6Q2dV3FAvalg=
 github.com/gg582/hangul-logotype v0.0.0-20251026060500-5861dee1526c/go.mod h1:UVfMjq2qhhzunGZ2X/1pqAI1zYJM5wJ4ao0FhEMH2/I=
-github.com/snowmerak/hangul-logotype v0.0.0-20251025130809-68b94b6f354d h1:2RF0ox+aFNSgQfMYtXF20kw9DpcNQtkIOhuaOqPy+cc=
-github.com/snowmerak/hangul-logotype v0.0.0-20251025130809-68b94b6f354d/go.mod h1:iCCPXul+/T7QLdzvNt/4yW/bD1zO/yMeYp98wIriR9U=
+golang.org/x/sys v0.25.0 h1:r+8e+loiHxRqhXVl6ML1nO3l1+oFoWbnlu2Ehimmi34=
+golang.org/x/sys v0.25.0/go.mod h1:/VUhepiaJMQUp4+oa/7Zr1D23ma6VTLIYjOOTFZPUcA=

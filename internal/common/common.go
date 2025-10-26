@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/snowmerak/hangul-logotype/hangul"
+	"github.com/gg582/hangul-logotype/hangul"
 )
 
 const (

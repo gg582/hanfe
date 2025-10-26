@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"hanfe/internal/linux"
+	"github.com/gg582/hanfe/internal/linux"
 )
 
 func TestDefaultToggleConfig(t *testing.T) {

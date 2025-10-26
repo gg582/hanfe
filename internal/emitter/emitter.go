@@ -7,9 +7,9 @@ import (
 	"unicode/utf8"
 	"unsafe"
 
-	"hanfe/internal/linux"
-	"hanfe/internal/ttybridge"
-	"hanfe/internal/util"
+	"github.com/gg582/hanfe/internal/linux"
+	"github.com/gg582/hanfe/internal/ttybridge"
+	"github.com/gg582/hanfe/internal/util"
 )
 
 type FallbackEmitter struct {

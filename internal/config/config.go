@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"hanfe/internal/linux"
+	"github.com/gg582/hanfe/internal/linux"
 )
 
 type ToggleChord struct {

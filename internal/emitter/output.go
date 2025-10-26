@@ -1,6 +1,6 @@
 package emitter
 
-import "hanfe/internal/util"
+import "github.com/gg582/hanfe/internal/util"
 
 // Output represents the operations required by the engine to emit characters,
 // update preedit text, and forward raw input events. It is satisfied by

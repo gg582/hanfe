@@ -11,8 +11,8 @@ import (
 	"syscall"
 	"time"
 
-	"hanfe/internal/common"
-	"hanfe/internal/ttybridge"
+	"github.com/gg582/hanfe/internal/common"
+	"github.com/gg582/hanfe/internal/ttybridge"
 )
 
 func main() {
