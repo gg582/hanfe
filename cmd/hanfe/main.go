@@ -10,7 +10,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/snowmerak/hangul-logotype/hangul"
+	"github.com/gg582/hangul-logotype/hangul"
 
 	"hanfe/internal/backend"
 	"hanfe/internal/cli"

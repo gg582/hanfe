@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/snowmerak/hangul-logotype/hangul"
+	"github.com/gg582/hangul-logotype/hangul"
 
 	"hanfe/internal/common"
 )
