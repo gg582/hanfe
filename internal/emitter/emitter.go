@@ -20,6 +20,7 @@ type FallbackEmitter struct {
 	hexKeycodes  [16]int
 	inputBuffer  strings.Builder
 	directCommit bool
+	x11          *x11Injector
 }
 
 const (
@@ -80,6 +81,10 @@ func Open(hexMap map[rune]uint16, ttyClient *ttybridge.Client, ptyPath string, d
 			return nil, fmt.Errorf("open pty %s: %w", ptyPath, err)
 		}
 		emitter.ptyFD = ptyFD
+	} else if !directCommit {
+		if injector, err := newX11Injector(); err == nil {
+			emitter.x11 = injector
+		}
 	}
 
 	return emitter, nil
@@ -133,6 +138,10 @@ func (e *FallbackEmitter) Close() error {
 	if e.ptyFD >= 0 {
 		syscall.Close(e.ptyFD)
 		e.ptyFD = -1
+	}
+	if e.x11 != nil {
+		_ = e.x11.Close()
+		e.x11 = nil
 	}
 	return nil
 }
@@ -203,6 +212,18 @@ func (e *FallbackEmitter) SendText(text string) error {
 			return fmt.Errorf("invalid utf-8 sequence")
 		}
 		return e.flushBuffer()
+	}
+	if e.x11 != nil {
+		if !utf8.ValidString(text) {
+			e.inputBuffer.Reset()
+			return fmt.Errorf("invalid utf-8 sequence")
+		}
+		if err := e.x11.TypeText(text); err != nil {
+			e.inputBuffer.Reset()
+			return err
+		}
+		e.inputBuffer.Reset()
+		return nil
 	}
 	remaining := text
 	for len(remaining) > 0 {
@@ -355,5 +376,8 @@ func hexIndex(ch rune) int {
 }
 
 func (e *FallbackEmitter) SupportsPreedit() bool {
-	return e.directCommit
+	if e.directCommit {
+		return true
+	}
+	return e.x11 != nil
 }
