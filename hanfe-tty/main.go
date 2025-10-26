@@ -10,7 +10,7 @@ import (
 
 	"github.com/gg582/hangul-logotype/hangul"
 
-	"hanfe/internal/common"
+	"github.com/gg582/hanfe/internal/common"
 )
 
 func main() {

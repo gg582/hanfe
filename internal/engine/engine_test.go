@@ -3,11 +3,11 @@ package engine
 import (
 	"testing"
 
-	"hanfe/internal/config"
-	"hanfe/internal/layout"
-	"hanfe/internal/linux"
-	"hanfe/internal/types"
-	"hanfe/internal/util"
+	"github.com/gg582/hanfe/internal/config"
+	"github.com/gg582/hanfe/internal/layout"
+	"github.com/gg582/hanfe/internal/linux"
+	"github.com/gg582/hanfe/internal/types"
+	"github.com/gg582/hanfe/internal/util"
 )
 
 type fakeEmitter struct {

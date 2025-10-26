@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"unsafe"
 
-	"hanfe/internal/linux"
+	"github.com/gg582/hanfe/internal/linux"
 )
 
 type DetectedDevice struct {

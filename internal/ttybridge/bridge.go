@@ -19,6 +19,20 @@ const (
 
 var retainedParent *os.File
 
+// RememberTTYPath stores the resolved TTY path in the process environment so it
+// can be reused after daemonization or across exec boundaries.
+func RememberTTYPath(path string) {
+	if path == "" {
+		return
+	}
+	os.Setenv(pathEnv, path)
+}
+
+// TTYPathHint retrieves a previously remembered TTY path from the environment.
+func TTYPathHint() string {
+	return os.Getenv(pathEnv)
+}
+
 // BridgeFDForFork exposes the retained parent-side file descriptor for the
 // helper bridge so callers can preserve it across fork/exec boundaries. The
 // returned boolean indicates whether a descriptor should be forwarded and the

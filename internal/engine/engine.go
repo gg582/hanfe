@@ -5,14 +5,15 @@ import (
 	"strings"
 	"syscall"
 
-	"hanfe/internal/backend"
-	"hanfe/internal/config"
-	"hanfe/internal/emitter"
-	"hanfe/internal/hangul"
-	"hanfe/internal/layout"
-	"hanfe/internal/linux"
-	"hanfe/internal/types"
-	"hanfe/internal/util"
+	"github.com/gg582/hanfe/internal/backend"
+	"github.com/gg582/hanfe/internal/config"
+	"github.com/gg582/hanfe/internal/emitter"
+	"github.com/gg582/hanfe/internal/hangul"
+	"github.com/gg582/hanfe/internal/layout"
+	"github.com/gg582/hanfe/internal/linux"
+	"github.com/gg582/hanfe/internal/types"
+	"github.com/gg582/hanfe/internal/util"
+	"golang.org/x/sys/unix"
 )
 
 type ModeSpec struct {
@@ -111,12 +112,19 @@ func (e *Engine) Run() error {
 	defer e.emitter.Close()
 
 	size := util.InputEventSize()
+	pollFDs := []unix.PollFd{{Fd: int32(e.deviceFD), Events: unix.POLLIN}}
 	for {
 		var ev util.InputEvent
 		buf := ev.Bytes()
 		n, err := syscall.Read(e.deviceFD, buf)
 		if err != nil {
-			if err == syscall.EAGAIN || err == syscall.EINTR {
+			if err == syscall.EINTR {
+				continue
+			}
+			if err == syscall.EAGAIN {
+				if pollErr := waitForReadable(pollFDs); pollErr != nil {
+					return fmt.Errorf("poll input device: %w", pollErr)
+				}
 				continue
 			}
 			return fmt.Errorf("read input event: %w", err)
@@ -129,6 +137,36 @@ func (e *Engine) Run() error {
 		}
 		if err := e.processEvent(&ev); err != nil {
 			return err
+		}
+	}
+}
+
+func waitForReadable(pollFDs []unix.PollFd) error {
+	for {
+		for i := range pollFDs {
+			pollFDs[i].Revents = 0
+		}
+		n, err := unix.Poll(pollFDs, -1)
+		if err == syscall.EINTR {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			continue
+		}
+		ready := false
+		for _, fd := range pollFDs {
+			if fd.Revents&(unix.POLLERR|unix.POLLHUP|unix.POLLNVAL) != 0 {
+				return syscall.EIO
+			}
+			if fd.Revents&(unix.POLLIN|unix.POLLPRI) != 0 {
+				ready = true
+			}
+		}
+		if ready {
+			return nil
 		}
 	}
 }

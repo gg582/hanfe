@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sort"
 
-	"hanfe/internal/hangul"
-	"hanfe/internal/linux"
+	"github.com/gg582/hanfe/internal/hangul"
+	"github.com/gg582/hanfe/internal/linux"
 )
 
 type SymbolKind int
