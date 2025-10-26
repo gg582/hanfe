@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"hanfe/internal/common"
+	"hanfe/internal/ttybridge"
 )
 
 func main() {
@@ -26,8 +27,16 @@ func run() error {
 
 	layoutName := flag.String("layout", common.DefaultLayoutName, "layout to use for both hanfe and hanfe-tty")
 	socketPath := flag.String("socket", defaultSocket, "unix socket shared between hanfe and hanfe-tty")
-	noTTY := flag.Bool("no-tty", false, "do not launch hanfe-tty after starting the daemon")
+	var launchTTY bool
+	var skipTTY bool
+	flag.BoolVar(&launchTTY, "launch-tty", false, "launch hanfe-tty after starting the daemon")
+	flag.BoolVar(&launchTTY, "with-tty", false, "alias for --launch-tty")
+	flag.BoolVar(&skipTTY, "no-tty", false, "do not launch hanfe-tty after starting the daemon")
 	flag.Parse()
+
+	if skipTTY {
+		launchTTY = false
+	}
 
 	_, canonical, err := common.ResolveLayout(*layoutName)
 	if err != nil {
@@ -41,18 +50,18 @@ func run() error {
 		return err
 	}
 
-	if *noTTY {
+	if !launchTTY {
 		return nil
 	}
 
 	ttyArgs := []string{"--layout", canonical, "--socket", *socketPath}
 	ttyArgs = append(ttyArgs, flag.Args()...)
-	ttyPath, err := exec.LookPath("hanfe-tty")
+	ttyBinary, err := exec.LookPath("hanfe-tty")
 	if err != nil {
 		return fmt.Errorf("cannot find hanfe-tty binary: %w", err)
 	}
 
-	ttyCmd := exec.CommandContext(ctx, ttyPath, ttyArgs...)
+	ttyCmd := exec.CommandContext(ctx, ttyBinary, ttyArgs...)
 	ttyCmd.Stdout = os.Stdout
 	ttyCmd.Stderr = os.Stderr
 	ttyCmd.Stdin = os.Stdin
@@ -70,7 +79,11 @@ func launchHanfeDaemon(ctx context.Context, layout, socketPath string) error {
 		return fmt.Errorf("cannot find hanfe binary: %w", err)
 	}
 
-	args := []string{"--daemonize", "--layout", layout, "--socket", socketPath}
+	args := []string{"--daemonize", "--layout", layout, "--socket", socketPath, "--no-hex"}
+
+	if ttyPath, err := ttybridge.DetectTTYPath(); err == nil && ttyPath != "" {
+		args = append(args, "--tty", ttyPath)
+	}
 	hanfeCmd := exec.CommandContext(ctx, hanfePath, args...)
 	hanfeCmd.Stdout = os.Stdout
 	hanfeCmd.Stderr = os.Stderr
