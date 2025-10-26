@@ -12,6 +12,7 @@ type Output interface {
 	TapKey(code uint16) error
 	SendBackspace(count int) error
 	SendText(text string) error
+	SupportsPreedit() bool
 }
 
 var _ Output = (*FallbackEmitter)(nil)

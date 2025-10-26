@@ -102,7 +102,7 @@ func run(args []string) error {
 		fmt.Fprintf(os.Stderr, "hanfe: using keyboard %s (%s)\n", detected.Path, detected.Name)
 	}
 
-	deviceFD, err := syscall.Open(devicePath, syscall.O_RDONLY|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0)
+	deviceFD, err := syscall.Open(devicePath, syscall.O_RDONLY|syscall.O_CLOEXEC, 0)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", devicePath, err)
 	}
@@ -114,16 +114,19 @@ func run(args []string) error {
 	}
 	defer closeDevice()
 
-	ttyPath := opts.TTYPath
-	if ttyPath == "" {
-		if detectedTTY, derr := ttybridge.DetectTTYPath(); derr == nil {
-			ttyPath = detectedTTY
-		}
-	}
+	directCommit := opts.SuppressHex || opts.TTYPath != "" || opts.PTYPath != ""
 
-	directCommit := opts.SuppressHex || !hasDisplay() || opts.TTYPath != "" || opts.PTYPath != ""
-	if directCommit && ttyPath == "" && opts.PTYPath == "" {
-		directCommit = false
+	ttyPath := ""
+	if directCommit {
+		ttyPath = opts.TTYPath
+		if ttyPath == "" {
+			if detectedTTY, derr := ttybridge.DetectTTYPath(); derr == nil {
+				ttyPath = detectedTTY
+			}
+		}
+		if ttyPath == "" && opts.PTYPath == "" {
+			directCommit = false
+		}
 	}
 
 	var ttyClient *ttybridge.Client
@@ -400,10 +403,6 @@ func buildModes(cycle []string, hangulLayout *layout.Layout, hangulName string, 
 		return nil, fmt.Errorf("no input modes available after applying toggle configuration")
 	}
 	return modes, nil
-}
-
-func hasDisplay() bool {
-	return os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
 }
 
 type translationServer struct {

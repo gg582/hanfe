@@ -555,11 +555,11 @@ func (e *Engine) commitPinyinBuffer() error {
 }
 
 func (e *Engine) replacePreedit(newText string) error {
-	if e.currentModeKind() == types.ModeHangul {
-		e.preedit = newText
+	if newText == e.preedit {
 		return nil
 	}
-	if newText == e.preedit {
+	if !e.emitter.SupportsPreedit() {
+		e.preedit = newText
 		return nil
 	}
 	suspended, err := e.suspendForwardedModifiers()

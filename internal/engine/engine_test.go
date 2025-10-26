@@ -11,7 +11,10 @@ import (
 )
 
 type fakeEmitter struct {
-	buffer []rune
+	buffer          []rune
+	supportsPreedit bool
+	texts           []string
+	backspaces      []int
 }
 
 func (f *fakeEmitter) Close() error { return nil }
@@ -26,6 +29,7 @@ func (f *fakeEmitter) SendBackspace(count int) error {
 	if count <= 0 {
 		return nil
 	}
+	f.backspaces = append(f.backspaces, count)
 	if count > len(f.buffer) {
 		f.buffer = nil
 		return nil
@@ -38,11 +42,14 @@ func (f *fakeEmitter) SendText(text string) error {
 	if text == "" {
 		return nil
 	}
+	f.texts = append(f.texts, text)
 	f.buffer = append(f.buffer, []rune(text)...)
 	return nil
 }
 
 func (f *fakeEmitter) String() string { return string(f.buffer) }
+
+func (f *fakeEmitter) SupportsPreedit() bool { return f.supportsPreedit }
 
 func newTestEngine(t *testing.T) (*Engine, *fakeEmitter) {
 	t.Helper()
@@ -51,7 +58,7 @@ func newTestEngine(t *testing.T) (*Engine, *fakeEmitter) {
 	if err != nil {
 		t.Fatalf("load layout: %v", err)
 	}
-	emitter := &fakeEmitter{}
+	emitter := &fakeEmitter{supportsPreedit: true}
 	layoutCopy := keyLayout
 	toggle := config.DefaultToggleConfig()
 	toggle.ModeCycle = []string{"dubeolsik", "latin"}
@@ -87,8 +94,8 @@ func TestEngineSeparatesBojaFromBwaj(t *testing.T) {
 	pressKey(t, eng, uint16(linux.KeyW))
 	pressKey(t, eng, uint16(linux.KeyK))
 
-	if got := out.String(); got != "보" {
-		t.Fatalf("expected buffer to contain committed '보', got %q", got)
+	if got := out.String(); got != "보자" {
+		t.Fatalf("expected buffer to contain committed '보' followed by preedit '자', got %q", got)
 	}
 	if eng.preedit != "자" {
 		t.Fatalf("expected preedit '자', got %q", eng.preedit)
@@ -103,10 +110,51 @@ func TestEngineRetainsDoubleMedialForBwaj(t *testing.T) {
 	pressKey(t, eng, uint16(linux.KeyK))
 	pressKey(t, eng, uint16(linux.KeyW))
 
-	if got := out.String(); got != "" {
-		t.Fatalf("expected buffer to remain empty before commit, got %q", got)
+	if got := out.String(); got != "봦" {
+		t.Fatalf("expected buffer to reflect preedit '봦', got %q", got)
 	}
 	if eng.preedit != "봦" {
 		t.Fatalf("expected preedit '봦', got %q", eng.preedit)
+	}
+}
+
+func TestEngineSkipsPreeditWhenUnsupported(t *testing.T) {
+	eng, out := newTestEngine(t)
+	out.supportsPreedit = false
+
+	if err := eng.replacePreedit("난"); err != nil {
+		t.Fatalf("replace preedit: %v", err)
+	}
+	if len(out.texts) != 0 {
+		t.Fatalf("expected no text emissions, got %v", out.texts)
+	}
+	if len(out.backspaces) != 0 {
+		t.Fatalf("expected no backspace emissions, got %v", out.backspaces)
+	}
+	if eng.preedit != "난" {
+		t.Fatalf("expected stored preedit '난', got %q", eng.preedit)
+	}
+
+	if err := eng.replacePreedit(""); err != nil {
+		t.Fatalf("clear preedit: %v", err)
+	}
+	if len(out.texts) != 0 {
+		t.Fatalf("expected no text emissions after clearing, got %v", out.texts)
+	}
+	if len(out.backspaces) != 0 {
+		t.Fatalf("expected no backspace emissions after clearing, got %v", out.backspaces)
+	}
+	if eng.preedit != "" {
+		t.Fatalf("expected empty preedit, got %q", eng.preedit)
+	}
+
+	if err := eng.sendText("난"); err != nil {
+		t.Fatalf("send text: %v", err)
+	}
+	if got := out.String(); got != "난" {
+		t.Fatalf("expected committed text '난', got %q", got)
+	}
+	if len(out.texts) != 1 || out.texts[0] != "난" {
+		t.Fatalf("expected single committed text '난', got %v", out.texts)
 	}
 }

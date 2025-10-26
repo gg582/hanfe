@@ -353,3 +353,7 @@ func hexIndex(ch rune) int {
 		return -1
 	}
 }
+
+func (e *FallbackEmitter) SupportsPreedit() bool {
+	return e.directCommit
+}
