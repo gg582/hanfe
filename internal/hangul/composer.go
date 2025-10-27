@@ -1,5 +1,11 @@
 package hangul
 
+import (
+	"bytes"
+
+	logotype "github.com/gg582/hangul-logotype/hangul"
+)
+
 type JamoRole int
 
 const (
@@ -14,18 +20,17 @@ type CompositionResult struct {
 }
 
 type HangulComposer struct {
-	leading  *rune
-	vowel    *rune
-	trailing *rune
+	leading  []rune
+	vowels   []rune
+	trailing []rune
 }
 
 func NewHangulComposer() *HangulComposer {
-	return &HangulComposer{}
-}
-
-func runePtr(r rune) *rune {
-	v := r
-	return &v
+	return &HangulComposer{
+		leading:  make([]rune, 0, 2),
+		vowels:   make([]rune, 0, 3),
+		trailing: make([]rune, 0, 2),
+	}
 }
 
 var (
@@ -34,98 +39,45 @@ var (
 	jongList = []rune{0, 'ㄱ', 'ㄲ', 'ㄳ', 'ㄴ', 'ㄵ', 'ㄶ', 'ㄷ', 'ㄹ', 'ㄺ', 'ㄻ', 'ㄼ', 'ㄽ', 'ㄾ', 'ㄿ', 'ㅀ', 'ㅁ', 'ㅂ', 'ㅄ', 'ㅅ', 'ㅆ', 'ㅇ', 'ㅈ', 'ㅊ', 'ㅋ', 'ㅌ', 'ㅍ', 'ㅎ'}
 )
 
-var (
-	doubleInitial = map[[2]rune]rune{
-		{'ㄱ', 'ㄱ'}: 'ㄲ',
-		{'ㄷ', 'ㄷ'}: 'ㄸ',
-		{'ㅂ', 'ㅂ'}: 'ㅃ',
-		{'ㅈ', 'ㅈ'}: 'ㅉ',
-		{'ㅅ', 'ㅅ'}: 'ㅆ',
-	}
-	doubleMedial = map[[2]rune]rune{
-		{'ㅗ', 'ㅏ'}: 'ㅘ',
-		{'ㅗ', 'ㅐ'}: 'ㅙ',
-		{'ㅗ', 'ㅣ'}: 'ㅚ',
-		{'ㅜ', 'ㅓ'}: 'ㅝ',
-		{'ㅜ', 'ㅔ'}: 'ㅞ',
-		{'ㅜ', 'ㅣ'}: 'ㅟ',
-		{'ㅡ', 'ㅣ'}: 'ㅢ',
-	}
-	doubleFinal = map[[2]rune]rune{
-		{'ㄱ', 'ㄱ'}: 'ㄲ',
-		{'ㄱ', 'ㅅ'}: 'ㄳ',
-		{'ㄴ', 'ㅈ'}: 'ㄵ',
-		{'ㄴ', 'ㅎ'}: 'ㄶ',
-		{'ㄹ', 'ㄱ'}: 'ㄺ',
-		{'ㄹ', 'ㅁ'}: 'ㄻ',
-		{'ㄹ', 'ㅂ'}: 'ㄼ',
-		{'ㄹ', 'ㅅ'}: 'ㄽ',
-		{'ㄹ', 'ㅌ'}: 'ㄾ',
-		{'ㄹ', 'ㅍ'}: 'ㄿ',
-		{'ㄹ', 'ㅎ'}: 'ㅀ',
-		{'ㅂ', 'ㅅ'}: 'ㅄ',
-		{'ㅅ', 'ㅅ'}: 'ㅆ',
-	}
-)
-
-var (
-	initialDecompose = invertDouble(doubleInitial)
-	medialDecompose  = invertDouble(doubleMedial)
-	finalDecompose   = invertDouble(doubleFinal)
-)
-
-var (
-	choseongIndex  = buildIndex(choList)
-	jungseongIndex = buildIndex(jungList)
-	jongseongIndex = buildIndex(jongList)
-)
+var doubleInitial = map[[2]rune]rune{
+	{'ㄱ', 'ㄱ'}: 'ㄲ',
+	{'ㄷ', 'ㄷ'}: 'ㄸ',
+	{'ㅂ', 'ㅂ'}: 'ㅃ',
+	{'ㅈ', 'ㅈ'}: 'ㅉ',
+	{'ㅅ', 'ㅅ'}: 'ㅆ',
+}
 
 var (
 	consonantSet = buildSet(append(append([]rune{}, choList...), filterZero(jongList)...))
 	vowelSet     = buildSet(jungList)
+	finalSet     = buildSet(filterZero(jongList))
 )
 
-func invertDouble(src map[[2]rune]rune) map[rune][2]rune {
-	dst := make(map[rune][2]rune, len(src))
-	for pair, value := range src {
-		dst[value] = pair
-	}
-	return dst
-}
-
-func buildIndex(list []rune) map[rune]int {
-	idx := make(map[rune]int, len(list))
-	for i, ch := range list {
-		idx[ch] = i
-	}
-	return idx
-}
-
 func buildSet(list []rune) map[rune]struct{} {
-	set := make(map[rune]struct{}, len(list))
-	for _, ch := range list {
-		set[ch] = struct{}{}
+	out := make(map[rune]struct{}, len(list))
+	for _, r := range list {
+		out[r] = struct{}{}
 	}
-	return set
+	return out
 }
 
 func filterZero(list []rune) []rune {
-	out := make([]rune, 0, len(list))
-	for _, ch := range list {
-		if ch != 0 {
-			out = append(out, ch)
+	var out []rune
+	for _, r := range list {
+		if r != 0 {
+			out = append(out, r)
 		}
 	}
 	return out
 }
 
-func isConsonant(ch rune) bool {
-	_, ok := consonantSet[ch]
+func isConsonant(r rune) bool {
+	_, ok := consonantSet[r]
 	return ok
 }
 
-func isVowel(ch rune) bool {
-	_, ok := vowelSet[ch]
+func isVowel(r rune) bool {
+	_, ok := vowelSet[r]
 	return ok
 }
 
@@ -136,205 +88,221 @@ func (c *HangulComposer) Feed(ch rune, role JamoRole) CompositionResult {
 	} else {
 		commit = c.handleConsonant(ch, role)
 	}
-	result := CompositionResult{
+	return CompositionResult{
 		Commit:  string(commit),
 		Preedit: string(c.currentPreedit()),
 	}
-	return result
 }
 
 func (c *HangulComposer) Backspace() (string, bool) {
-	if c.trailing != nil {
-		if pair, ok := finalDecompose[*c.trailing]; ok {
-			first := pair[0]
-			c.trailing = runePtr(first)
-		} else {
-			c.trailing = nil
-		}
-		return string(c.currentPreedit()), true
+	switch {
+	case len(c.trailing) > 0:
+		c.trailing = c.trailing[:len(c.trailing)-1]
+	case len(c.vowels) > 0:
+		c.vowels = c.vowels[:len(c.vowels)-1]
+	case len(c.leading) > 0:
+		c.leading = c.leading[:len(c.leading)-1]
+	default:
+		return "", false
 	}
-	if c.vowel != nil {
-		if pair, ok := medialDecompose[*c.vowel]; ok {
-			first := pair[0]
-			c.vowel = runePtr(first)
-		} else {
-			c.vowel = nil
-		}
-		return string(c.currentPreedit()), true
-	}
-	if c.leading != nil {
-		if pair, ok := initialDecompose[*c.leading]; ok {
-			first := pair[0]
-			c.leading = runePtr(first)
-		} else {
-			c.leading = nil
-		}
-		return string(c.currentPreedit()), true
-	}
-	return "", false
+	return string(c.currentPreedit()), true
 }
 
 func (c *HangulComposer) Flush() string {
-	commit := string(c.compose())
-	c.leading = nil
-	c.vowel = nil
-	c.trailing = nil
+	commit := string(c.composeCurrent())
+	c.reset()
 	return commit
 }
 
 func (c *HangulComposer) handleConsonant(ch rune, role JamoRole) []rune {
 	var commit []rune
-	forceTrailing := role == RoleTrailing
-	forceLeading := role == RoleLeading
 
-	if c.leading == nil {
-		if c.vowel != nil {
-			commit = append(commit, *c.vowel)
-			c.vowel = nil
+	if !isConsonant(ch) {
+		commit = append(commit, c.composeCurrent()...)
+		c.reset()
+		return append(commit, ch)
+	}
+
+	if len(c.leading) == 0 {
+		if len(c.vowels) > 0 {
+			commit = append(commit, c.composeCurrent()...)
+			c.reset()
 		}
-		c.leading = runePtr(ch)
-		c.trailing = nil
+		c.leading = append(c.leading[:0], ch)
+		c.trailing = c.trailing[:0]
 		return commit
 	}
 
-	if forceLeading {
-		commit = c.compose()
-		c.leading = runePtr(ch)
-		c.vowel = nil
-		c.trailing = nil
+	if role == RoleLeading {
+		commit = append(commit, c.composeCurrent()...)
+		c.reset()
+		c.leading = append(c.leading[:0], ch)
 		return commit
 	}
 
-	if c.vowel == nil {
-		pair := [2]rune{*c.leading, ch}
-		if combined, ok := doubleInitial[pair]; ok {
-			c.leading = runePtr(combined)
-		} else {
-			commit = append(commit, *c.leading)
-			c.leading = runePtr(ch)
+	if len(c.vowels) == 0 {
+		if len(c.leading) == 1 {
+			pair := [2]rune{c.leading[0], ch}
+			if _, ok := doubleInitial[pair]; ok {
+				c.leading = append(c.leading, ch)
+				return commit
+			}
 		}
+		commit = append(commit, composeLeading(c.leading)...)
+		c.leading = append(c.leading[:0], ch)
+		c.trailing = c.trailing[:0]
 		return commit
 	}
 
-	if forceTrailing {
+	if role == RoleTrailing {
 		return c.attachTrailing(ch)
 	}
 
-	if c.trailing == nil {
-		if isConsonant(ch) {
-			c.trailing = runePtr(ch)
-			return commit
-		}
-		commit = c.compose()
-		c.leading = runePtr(ch)
-		c.vowel = nil
-		c.trailing = nil
+	if len(c.trailing) == 0 {
+		c.trailing = append(c.trailing[:0], ch)
 		return commit
 	}
 
-	pair := [2]rune{*c.trailing, ch}
-	if combined, ok := doubleFinal[pair]; ok {
-		c.trailing = runePtr(combined)
-	} else {
-		commit = c.compose()
-		c.leading = runePtr(ch)
-		c.vowel = nil
-		c.trailing = nil
+	candidate := append(append([]rune{}, c.trailing...), ch)
+	if isValidFinal(candidate) {
+		c.trailing = candidate
+		return commit
 	}
+
+	commit = append(commit, c.composeCurrent()...)
+	c.reset()
+	c.leading = append(c.leading[:0], ch)
 	return commit
 }
 
 func (c *HangulComposer) handleVowel(ch rune) []rune {
 	var commit []rune
 
-	if c.vowel == nil {
-		c.vowel = runePtr(ch)
+	if len(c.trailing) > 0 {
+		commit = append(commit, c.detachTrailingForLeading()...)
+	}
+
+	if len(c.vowels) == 0 {
+		c.vowels = append(c.vowels[:0], ch)
 		return commit
 	}
 
-	if c.trailing != nil {
-		if split, ok := finalDecompose[*c.trailing]; ok {
-			first := split[0]
-			second := split[1]
-			c.trailing = runePtr(first)
-			commit = c.compose()
-			c.leading = runePtr(second)
-			c.vowel = runePtr(ch)
-			c.trailing = nil
-			return commit
-		}
-		trailing := *c.trailing
-		c.trailing = nil
-		commit = c.compose()
-		c.leading = runePtr(trailing)
-		c.vowel = runePtr(ch)
-		c.trailing = nil
+	candidate := append(append([]rune{}, c.vowels...), ch)
+	if isCombinedVowel(candidate) {
+		c.vowels = append(c.vowels, ch)
 		return commit
 	}
 
-	pair := [2]rune{*c.vowel, ch}
-	if combined, ok := doubleMedial[pair]; ok {
-		c.vowel = runePtr(combined)
-		return commit
+	if len(c.leading) == 0 {
+		commit = append(commit, composeRunes(c.vowels)...)
+	} else {
+		commit = append(commit, c.composeCurrent()...)
 	}
 
-	commit = c.compose()
-	c.leading = nil
-	c.vowel = runePtr(ch)
-	c.trailing = nil
+	c.leading = c.leading[:0]
+	c.vowels = append(c.vowels[:0], ch)
+	c.trailing = c.trailing[:0]
 	return commit
 }
 
 func (c *HangulComposer) attachTrailing(ch rune) []rune {
 	var commit []rune
-	if c.trailing == nil {
-		if isConsonant(ch) {
-			c.trailing = runePtr(ch)
-			return commit
-		}
-		commit = c.compose()
-		c.leading = runePtr(ch)
-		c.vowel = nil
-		c.trailing = nil
+
+	if !isConsonant(ch) {
+		commit = append(commit, c.composeCurrent()...)
+		c.reset()
+		c.leading = append(c.leading[:0], ch)
 		return commit
 	}
 
-	pair := [2]rune{*c.trailing, ch}
-	if combined, ok := doubleFinal[pair]; ok {
-		c.trailing = runePtr(combined)
+	if len(c.trailing) == 0 {
+		c.trailing = append(c.trailing[:0], ch)
 		return commit
 	}
 
-	commit = c.compose()
-	c.leading = runePtr(ch)
-	c.vowel = nil
-	c.trailing = nil
+	candidate := append(append([]rune{}, c.trailing...), ch)
+	if isValidFinal(candidate) {
+		c.trailing = candidate
+		return commit
+	}
+
+	commit = append(commit, c.composeCurrent()...)
+	c.reset()
+	c.leading = append(c.leading[:0], ch)
 	return commit
 }
 
-func (c *HangulComposer) compose() []rune {
-	if c.leading == nil && c.vowel == nil {
-		return []rune{}
+func (c *HangulComposer) detachTrailingForLeading() []rune {
+	carry := c.trailing
+	nextLeading := carry[len(carry)-1]
+	if len(carry) > 1 {
+		c.trailing = carry[:len(carry)-1]
+	} else {
+		c.trailing = c.trailing[:0]
 	}
-	if c.leading != nil && c.vowel != nil {
-		leadIdx := choseongIndex[*c.leading]
-		vowelIdx := jungseongIndex[*c.vowel]
-		tailIdx := 0
-		if c.trailing != nil {
-			tailIdx = jongseongIndex[*c.trailing]
-		}
-		codepoint := rune(0xAC00 + ((leadIdx*21)+vowelIdx)*28 + tailIdx)
-		return []rune{codepoint}
+	committed := c.composeCurrent()
+	c.leading = append(c.leading[:0], nextLeading)
+	c.vowels = c.vowels[:0]
+	c.trailing = c.trailing[:0]
+	return committed
+}
+
+func (c *HangulComposer) composeCurrent() []rune {
+	raw := make([]rune, 0, 1+len(c.vowels)+len(c.trailing))
+	if lead := composeLeading(c.leading); len(lead) > 0 {
+		raw = append(raw, lead...)
 	}
-	if c.leading != nil {
-		return []rune{*c.leading}
-	}
-	if c.vowel != nil {
-		return []rune{*c.vowel}
-	}
-	return []rune{}
+	raw = append(raw, c.vowels...)
+	raw = append(raw, c.trailing...)
+	return composeRunes(raw)
 }
 
 func (c *HangulComposer) currentPreedit() []rune {
-	return c.compose()
+	return c.composeCurrent()
+}
+
+func (c *HangulComposer) reset() {
+	c.leading = c.leading[:0]
+	c.vowels = c.vowels[:0]
+	c.trailing = c.trailing[:0]
+}
+
+func composeLeading(parts []rune) []rune {
+	switch len(parts) {
+	case 0:
+		return nil
+	case 1:
+		return []rune{parts[0]}
+	case 2:
+		pair := [2]rune{parts[0], parts[1]}
+		if combined, ok := doubleInitial[pair]; ok {
+			return []rune{combined}
+		}
+		return []rune{parts[0], parts[1]}
+	default:
+		return append([]rune{}, parts...)
+	}
+}
+
+func isCombinedVowel(candidate []rune) bool {
+	composed := composeRunes(candidate)
+	return len(composed) == 1 && isVowel(composed[0])
+}
+
+func isValidFinal(candidate []rune) bool {
+	composed := composeRunes(candidate)
+	if len(composed) != 1 {
+		return false
+	}
+	_, ok := finalSet[composed[0]]
+	return ok
+}
+
+func composeRunes(raw []rune) []rune {
+	if len(raw) == 0 {
+		return nil
+	}
+	var buf bytes.Buffer
+	logotype.LogoType(&buf, raw)
+	return []rune(buf.String())
 }
